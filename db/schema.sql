@@ -46,6 +46,7 @@ create table if not exists players (
     team_id              uuid references teams(id) on delete set null,
     jersey_number        int,
     primary_position_id  uuid references positions(id),
+    positions            text[],                        -- eligible position codes, e.g. {SS,2B}
     bats                 text check (bats in ('L', 'R', 'S')),
     throws               text check (throws in ('L', 'R')),
     active               boolean default true,

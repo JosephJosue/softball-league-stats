@@ -57,6 +57,7 @@ class PlayerCreate(_Payload):
     team_id: str | None = None
     jersey_number: int | None = None
     primary_position_id: str | None = None
+    positions: list[str] | None = None  # eligible position codes, e.g. ["SS", "2B"]
     bats: str | None = Field(default=None, pattern="^[LRS]$")
     throws: str | None = Field(default=None, pattern="^[LR]$")
     active: bool = True

@@ -1,4 +1,4 @@
-"""Players page: roster, per-player stats, and admin CRUD."""
+"""Players page: roster, per-player offense/defense stats, and admin CRUD."""
 
 from __future__ import annotations
 
@@ -17,6 +17,11 @@ from ui import components
 from utils import filters
 
 
+def _as_list(value) -> list[str]:
+    """Coerce a positions cell (list / NaN / None) to a clean list of codes."""
+    return list(value) if isinstance(value, list) else []
+
+
 def render() -> None:
     st.subheader("👤 Players")
     client = auth.get_db()
@@ -32,10 +37,12 @@ def render() -> None:
     else:
         disp = roster.copy()
         disp["team"] = disp["team_id"].map(team_names).fillna("—")
-        cols = [c for c in ["name", "team", "jersey_number", "bats", "throws", "active"] if c in disp.columns]
+        if "positions" in disp.columns:
+            disp["pos"] = disp["positions"].apply(lambda v: ", ".join(_as_list(v)) or "—")
+        cols = [c for c in ["name", "team", "pos", "jersey_number", "bats", "throws", "active"] if c in disp.columns]
         st.dataframe(
             disp[cols].rename(
-                columns={"name": "Player", "team": "Team", "jersey_number": "#",
+                columns={"name": "Player", "team": "Team", "pos": "Pos", "jersey_number": "#",
                          "bats": "B", "throws": "T", "active": "Active"}
             ),
             use_container_width=True,
@@ -54,10 +61,20 @@ def render() -> None:
 
 
 def _player_detail(client, player_id: str, player_name: str) -> None:
-    """Season totals + game-by-game log for one player."""
+    """Offense + defense views for one player, on switchable tabs."""
+    player = players_svc.get_player(player_id, client=client) or {}
+    lines = stats_svc.list_player_game_stats(client, player_id=player_id)
+
+    tab_off, tab_def = st.tabs(["⚾ Offense", "🧤 Defense"])
+    with tab_off:
+        _offense_view(client, player_id, player_name, lines)
+    with tab_def:
+        _defense_view(client, player, lines)
+
+
+def _offense_view(client, player_id: str, player_name: str, lines: pd.DataFrame) -> None:
     totals = analytics.player_season_totals(client)
     mine = totals[totals["player_id"] == player_id] if not totals.empty else totals
-
     if not mine.empty:
         agg = mine.iloc[0]
         components.metric_row(
@@ -68,19 +85,39 @@ def _player_detail(client, player_id: str, player_name: str) -> None:
     else:
         st.caption("No batting stats recorded yet for this player.")
 
-    # Game log: join stat lines with game dates/opponents.
-    lines = stats_svc.list_player_game_stats(client, player_id=player_id)
     if lines.empty:
         return
     games_df = games_svc.list_games(client)
+    log = lines.copy()
     if not games_df.empty:
         gmap = games_df.set_index("id")["game_date"].to_dict()
-        lines = lines.copy()
-        lines["date"] = lines["game_id"].map(gmap)
-        lines = lines.sort_values("date", ascending=False)
+        log["date"] = log["game_id"].map(gmap)
+        log = log.sort_values("date", ascending=False)
     st.markdown(f"**Game log — {player_name}**")
-    keep = [c for c in ["date", "ab", "r", "h", "rbi", "bb", "so", "doubles", "triples", "hr", "tb", "errors"] if c in lines.columns]
-    components.show_stat_table(lines[keep], card_title_col="date", key="player_log")
+    keep = [c for c in ["date", "ab", "r", "h", "rbi", "bb", "so", "doubles", "triples", "hr", "tb"] if c in log.columns]
+    components.show_stat_table(log[keep], card_title_col="date", key="player_log")
+
+
+def _defense_view(client, player: dict, lines: pd.DataFrame) -> None:
+    eligible = _as_list(player.get("positions"))
+    st.write("**Eligible positions:** " + (", ".join(eligible) if eligible else "—"))
+
+    if lines.empty or "position_id" not in lines.columns:
+        st.caption("No defensive appearances recorded yet.")
+        return
+
+    id2code = pos_svc.id_to_code(client)
+    d = lines.copy()
+    d["Position"] = d["position_id"].map(id2code).fillna("—")
+    summary = (
+        d.groupby("Position")
+        .agg(Games=("id", "count"), Errors=("errors", "sum"))
+        .reset_index()
+        .sort_values("Games", ascending=False)
+    )
+    components.metric_row([("Appearances", int(len(d))), ("Total errors", int(d["errors"].sum()))], per_row=2)
+    st.markdown("**By position**")
+    st.dataframe(summary, use_container_width=True, hide_index=True)
 
 
 def _admin_section(client, roster) -> None:
@@ -90,6 +127,7 @@ def _admin_section(client, roster) -> None:
     teams_df = teams_svc.list_teams(client)
     team_opts = dict(zip(teams_df["name"], teams_df["id"])) if not teams_df.empty else {}
     pos_df = pos_svc.list_positions(client)
+    pos_codes = pos_df["code"].tolist() if not pos_df.empty else []
     pos_opts = dict(zip(pos_df["code"], pos_df["id"])) if not pos_df.empty else {}
 
     with st.expander("➕ Add player"):
@@ -97,7 +135,7 @@ def _admin_section(client, roster) -> None:
             name = st.text_input("Name *")
             team = st.selectbox("Team", ["—", *team_opts.keys()])
             number = st.number_input("Jersey #", min_value=0, value=0, step=1)
-            pos = st.selectbox("Primary position", ["—", *pos_opts.keys()])
+            positions = st.multiselect("Positions (defensive)", pos_codes)
             c1, c2 = st.columns(2)
             bats = c1.selectbox("Bats", ["—", "L", "R", "S"])
             throws = c2.selectbox("Throws", ["—", "L", "R"])
@@ -109,7 +147,8 @@ def _admin_section(client, roster) -> None:
                         name=name.strip(),
                         team_id=team_opts.get(team),
                         jersey_number=int(number) or None,
-                        primary_position_id=pos_opts.get(pos),
+                        primary_position_id=pos_opts.get(positions[0]) if positions else None,
+                        positions=positions or None,
                         bats=None if bats == "—" else bats,
                         throws=None if throws == "—" else throws,
                     ).for_insert()
@@ -128,8 +167,12 @@ def _admin_section(client, roster) -> None:
                 cur_team = next((k for k, v in team_opts.items() if v == row.get("team_id")), "—")
                 team = st.selectbox("Team", ["—", *team_keys], index=(["—", *team_keys].index(cur_team)))
                 jersey = row.get("jersey_number")
-                jersey_val = int(jersey) if pd.notna(jersey) else 0
-                number = st.number_input("Jersey #", min_value=0, value=jersey_val, step=1)
+                number = st.number_input(
+                    "Jersey #", min_value=0, value=int(jersey) if pd.notna(jersey) else 0, step=1
+                )
+
+                cur_positions = [p for p in _as_list(row.get("positions")) if p in pos_codes]
+                positions = st.multiselect("Positions (defensive)", pos_codes, default=cur_positions)
 
                 bats_opts = ["—", "L", "R", "S"]
                 throws_opts = ["—", "L", "R"]
@@ -148,6 +191,8 @@ def _admin_section(client, roster) -> None:
                             "name": name.strip(),
                             "team_id": team_opts.get(team),
                             "jersey_number": int(number) or None,
+                            "primary_position_id": pos_opts.get(positions[0]) if positions else None,
+                            "positions": positions or None,
                             "bats": None if bats == "—" else bats,
                             "throws": None if throws == "—" else throws,
                             "active": active,

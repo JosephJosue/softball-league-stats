@@ -86,6 +86,14 @@ The app opens in your browser. On the Phase 1 scaffold you should see a green
 > The `service_role` key is intentionally unused; it bypasses RLS and must never
 > reach the client.
 
+### Migrations
+
+On an **existing** database, apply incremental changes from `db/migrations/` in
+the Supabase SQL Editor (new installs already include them via `schema.sql`):
+
+- `001_add_player_positions.sql` — adds the `players.positions` (eligible
+  defensive positions) column.
+
 ---
 
 ## Troubleshooting

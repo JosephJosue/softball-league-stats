@@ -1,12 +1,13 @@
 """Upload Data page: import player stat lines from Excel/CSV/PDF.
 
 Pipeline: parse (raw table) -> auto-map columns -> validate -> preview ->
-resolve player/team names to IDs -> bulk upsert. Nothing is written until the
-admin clicks Import.
+fill details for any NEW players -> resolve names to IDs -> bulk upsert.
+Nothing is written until the admin clicks Import.
 """
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
 from auth import session as auth
@@ -58,9 +59,8 @@ def render() -> None:
     # --- 3. Validate ---
     rows, team_totals, errors = validation.validate_stat_rows(mapped)
     st.markdown("**3. Validation**")
-    if errors:
-        for e in errors:
-            st.error(e)
+    for e in errors:
+        st.error(e)
     if not rows:
         st.warning("No valid rows to import.")
         return
@@ -86,8 +86,12 @@ def render() -> None:
     default_team = st.selectbox("Team for these stats", list(team_opts.keys()))
     create_missing = st.checkbox("Create players that don't exist yet", value=True)
 
-    warns = validation.reconcile(rows, team_totals)
-    for w in warns:
+    # --- 4b. Fill details for NEW players (avoids editing them afterwards) ---
+    new_attrs: dict[str, dict] = {}
+    if create_missing:
+        new_attrs = _new_player_editor(client, rows)
+
+    for w in validation.reconcile(rows, team_totals):
         st.warning(f"Reconciliation: {w}")
 
     if st.button("🚀 Import stats", use_container_width=True):
@@ -98,7 +102,45 @@ def render() -> None:
             default_team_id=team_opts[default_team],
             team_opts=team_opts,
             create_missing=create_missing,
+            new_attrs=new_attrs,
         )
+
+
+def _new_player_editor(client, rows: list[dict]) -> dict[str, dict]:
+    """Editable table to fill jersey/bats/throws/position for new players."""
+    players_df = players_svc.list_players(client)
+    existing = {n.strip().lower() for n in players_df["name"]} if not players_df.empty else set()
+    new_names = sorted({r["player_name"] for r in rows if r["player_name"].strip().lower() not in existing})
+    if not new_names:
+        return {}
+
+    st.markdown("**New players — fill in their details**")
+    pos_codes = pos_svc.list_positions(client)["code"].tolist()
+    editor_df = pd.DataFrame(
+        [{"Player": n, "Jersey": 0, "Bats": "", "Throws": "", "Position": ""} for n in new_names]
+    )
+    edited = st.data_editor(
+        editor_df,
+        hide_index=True,
+        use_container_width=True,
+        disabled=["Player"],
+        column_config={
+            "Jersey": st.column_config.NumberColumn(min_value=0, step=1),
+            "Bats": st.column_config.SelectboxColumn(options=["", "L", "R", "S"]),
+            "Throws": st.column_config.SelectboxColumn(options=["", "L", "R"]),
+            "Position": st.column_config.SelectboxColumn(options=["", *pos_codes]),
+        },
+        key="new_players_editor",
+    )
+    attrs: dict[str, dict] = {}
+    for _, er in edited.iterrows():
+        attrs[str(er["Player"]).strip().lower()] = {
+            "jersey": int(er["Jersey"]) if pd.notna(er["Jersey"]) and er["Jersey"] else None,
+            "bats": er["Bats"] or None,
+            "throws": er["Throws"] or None,
+            "position": er["Position"] or None,
+        }
+    return attrs
 
 
 def _parse(filename: str, data: bytes):
@@ -125,9 +167,9 @@ def _do_import(
     default_team_id: str,
     team_opts: dict[str, str],
     create_missing: bool,
+    new_attrs: dict[str, dict],
 ) -> None:
     """Resolve names -> IDs (creating players if asked) and bulk upsert."""
-    # Lookups (lowercased for forgiving matching).
     players_df = players_svc.list_players(client)
     player_map = (
         {n.strip().lower(): i for n, i in zip(players_df["name"], players_df["id"])}
@@ -149,8 +191,19 @@ def _do_import(
             if not create_missing:
                 skipped.append(name)
                 continue
+            attrs = new_attrs.get(name.lower(), {})
+            pos_code = attrs.get("position")
             created = players_svc.create_player(
-                PlayerCreate(name=name, team_id=team_id).for_insert(), client=client
+                PlayerCreate(
+                    name=name,
+                    team_id=team_id,
+                    jersey_number=attrs.get("jersey"),
+                    bats=attrs.get("bats"),
+                    throws=attrs.get("throws"),
+                    primary_position_id=pos_map.get(pos_code) if pos_code else None,
+                    positions=[pos_code] if pos_code else None,
+                ).for_insert(),
+                client=client,
             )
             player_id = created["id"]
             player_map[name.lower()] = player_id
@@ -161,7 +214,6 @@ def _do_import(
             "team_id": team_id,
             "position_id": pos_map.get(str(row.get("position", "")).upper()),
         }
-        # Copy over all stat fields (batting + any pitching).
         for k, v in row.items():
             if k not in ("player_name", "team_name", "position"):
                 payload[k] = v
