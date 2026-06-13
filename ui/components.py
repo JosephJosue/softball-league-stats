@@ -8,6 +8,7 @@ an optional card view for narrow screens.
 from __future__ import annotations
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from pydantic import ValidationError
 
@@ -127,6 +128,28 @@ def humanize_validation_error(exc: ValidationError) -> str:
     # Capitalize the first letter for a tidy sentence.
     out = "; ".join(parts)
     return out[:1].upper() + out[1:] if out else "Invalid input."
+
+
+def skill_radar(scores: dict[str, float]) -> go.Figure:
+    """A closed radar/hexagon chart from {axis_label: 0-100 score}."""
+    cats = list(scores.keys())
+    vals = list(scores.values())
+    # Repeat the first point to close the polygon.
+    fig = go.Figure(
+        go.Scatterpolar(
+            r=vals + vals[:1],
+            theta=cats + cats[:1],
+            fill="toself",
+            line_color="#1f7a3d",
+        )
+    )
+    fig.update_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
+        showlegend=False,
+        height=360,
+        margin=dict(l=40, r=40, t=20, b=20),
+    )
+    return fig
 
 
 def metric_row(metrics: list[tuple[str, object]], per_row: int = 3) -> None:

@@ -60,10 +60,45 @@ def render() -> None:
         _admin_section(client, roster)
 
 
+def _skill_scores(client, player_id: str) -> dict[str, float] | None:
+    """Six skill axes as league percentile ranks (0-100) for the radar chart.
+
+    Blends offense and defense. Rate stats avoid favoring players with more
+    games; defense uses errors-per-game inverted (fewer errors -> higher).
+    """
+    df = analytics.player_season_totals(client)
+    if df.empty or player_id not in set(df["player_id"]):
+        return None
+    d = df.copy()
+    games = d["games"].replace(0, pd.NA)
+    d["bb_rate"] = d["bb"] / (d["ab"] + d["bb"]).replace(0, pd.NA)
+    d["rbi_pg"] = d["rbi"] / games
+    d["def_inv"] = -(d["errors"] / games)  # fewer errors ranks higher
+
+    axes = {
+        "Contact": "avg",
+        "Power": "slg",
+        "On-Base": "obp",
+        "Discipline": "bb_rate",
+        "Production": "rbi_pg",
+        "Defense": "def_inv",
+    }
+    ranks = pd.DataFrame({label: (d[col].rank(pct=True) * 100).round(0) for label, col in axes.items()})
+    ranks["player_id"] = d["player_id"].values
+    row = ranks[ranks["player_id"] == player_id].iloc[0]
+    return {label: float(row[label]) if pd.notna(row[label]) else 0.0 for label in axes}
+
+
 def _player_detail(client, player_id: str, player_name: str) -> None:
     """Offense + defense views for one player, on switchable tabs."""
     player = players_svc.get_player(player_id, client=client) or {}
     lines = stats_svc.list_player_game_stats(client, player_id=player_id)
+
+    # Skill radar (league percentile across 6 axes).
+    scores = _skill_scores(client, player_id)
+    if scores:
+        st.caption("Skill profile — percentile rank vs. the league (0–100).")
+        st.plotly_chart(components.skill_radar(scores), use_container_width=True)
 
     tab_off, tab_def = st.tabs(["⚾ Offense", "🧤 Defense"])
     with tab_off:
