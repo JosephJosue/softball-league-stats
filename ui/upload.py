@@ -213,13 +213,19 @@ def _render_game_import(client, card: GameCard) -> None:
 
 
 def _resolve_team(client, choice: str, parsed_name: str, season, team_id_by_name: dict) -> str:
-    """Return a team id, creating the team if the '➕ Create' option was picked."""
-    if choice.startswith("➕ Create"):
-        created = teams_svc.create_team(
-            TeamCreate(name=parsed_name, season=season).for_insert(), client=client
-        )
-        return created["id"]
-    return team_id_by_name[choice]
+    """Return a team id, creating the team only if it truly doesn't exist yet.
+
+    Always looks the name up first (fresh), so repeated imports / failed retries
+    never create duplicate teams — which in turn keeps game de-duplication (by
+    team id) reliable.
+    """
+    name = parsed_name if choice.startswith("➕ Create") else choice
+    existing_id = teams_svc.name_to_id(client).get(name)
+    if existing_id:
+        return existing_id
+    return teams_svc.create_team(
+        TeamCreate(name=name, season=season).for_insert(), client=client
+    )["id"]
 
 
 def _import_side(
@@ -291,6 +297,7 @@ def _do_game_import(
         game_date=gdate, season=season, away_team_id=away_id, home_team_id=home_id,
         away_score=card.away_score, home_score=card.home_score, status="final",
     ).for_insert()
+    reused = bool(game_id)
     if game_id:
         games_svc.update_game(game_id, payload, client=client)
     else:
@@ -328,8 +335,13 @@ def _do_game_import(
             client=client,
         )
 
-    st.success(f"Imported game: {n_away} away + {n_home} home stat lines, line score, and team totals.")
-    st.rerun()
+    action = "Updated" if reused else "Imported"
+    st.success(
+        f"✅ {action} game **{card.away_team} {card.away_score}–{card.home_score} "
+        f"{card.home_team}** ({gdate}): {n_away} away + {n_home} home stat lines, "
+        "line score, and team totals saved."
+    )
+    st.balloons()
 
 
 def _parse(filename: str, data: bytes):
@@ -410,8 +422,7 @@ def _do_import(
 
     if payloads:
         stats_svc.bulk_upsert_player_game_stats(payloads, client=client)
-        st.success(f"Imported {len(payloads)} stat line(s) into the selected game.")
+        st.success(f"✅ Imported {len(payloads)} stat line(s) into the selected game.")
+        st.balloons()
     if skipped:
         st.warning(f"Skipped (no matching player): {', '.join(skipped)}")
-    if payloads:
-        st.rerun()

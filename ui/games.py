@@ -188,6 +188,13 @@ def _admin_game_entry(client, game: dict, team_names: dict) -> None:
     _line_score_editor(client, game, team_names)
     _player_line_entry(client, game, team_names)
 
+    with st.expander("🗑️ Delete this game"):
+        st.caption("Deletes the game and all its stat lines, innings, and totals.")
+        if st.button("Delete game permanently", use_container_width=True, key="del_game"):
+            games_svc.delete_game(game["id"], client=client)
+            st.warning("Game deleted.")
+            st.rerun()
+
 
 def _line_score_editor(client, game: dict, team_names: dict) -> None:
     with st.expander("Line score (runs by inning)"):

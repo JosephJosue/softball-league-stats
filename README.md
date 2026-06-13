@@ -93,6 +93,8 @@ the Supabase SQL Editor (new installs already include them via `schema.sql`):
 
 - `001_add_player_positions.sql` — adds the `players.positions` (eligible
   defensive positions) column.
+- `002_unique_games.sql` — removes duplicate games and adds a unique index on
+  `(game_date, home_team_id, away_team_id)` so a matchup can't be imported twice.
 
 ---
 
