@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
 from auth import session as auth
@@ -126,7 +127,9 @@ def _admin_section(client, roster) -> None:
                 team_keys = list(team_opts.keys())
                 cur_team = next((k for k, v in team_opts.items() if v == row.get("team_id")), "—")
                 team = st.selectbox("Team", ["—", *team_keys], index=(["—", *team_keys].index(cur_team)))
-                number = st.number_input("Jersey #", min_value=0, value=int(row.get("jersey_number") or 0), step=1)
+                jersey = row.get("jersey_number")
+                jersey_val = int(jersey) if pd.notna(jersey) else 0
+                number = st.number_input("Jersey #", min_value=0, value=jersey_val, step=1)
                 active = st.checkbox("Active", value=bool(row.get("active", True)))
                 c1, c2 = st.columns(2)
                 if c1.form_submit_button("Save", use_container_width=True):
