@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+from pydantic import ValidationError
 
 from services import teams as teams_svc
 
@@ -106,6 +107,26 @@ def show_stat_table(
             hide_index=True,
             column_config=build_column_config(view),
         )
+
+
+def humanize_validation_error(exc: ValidationError) -> str:
+    """Turn a Pydantic ValidationError into a short, friendly sentence.
+
+    Strips the noisy "Value error, ...", the input dump, and the docs URL, so
+    users see e.g. "Hits (5) cannot exceed at-bats (2)" instead of a stack-trace
+    style blob.
+    """
+    parts: list[str] = []
+    for err in exc.errors():
+        msg = err.get("msg", "Invalid value").replace("Value error, ", "")
+        loc = ".".join(str(x) for x in err.get("loc", ()))
+        # Field-level constraint (e.g. ge=0) — prefix with the field name.
+        if loc and err.get("type", "").startswith(("greater", "less", "string")):
+            msg = f"{STAT_LABELS.get(loc, loc)}: {msg}"
+        parts.append(msg)
+    # Capitalize the first letter for a tidy sentence.
+    out = "; ".join(parts)
+    return out[:1].upper() + out[1:] if out else "Invalid input."
 
 
 def metric_row(metrics: list[tuple[str, object]], per_row: int = 3) -> None:

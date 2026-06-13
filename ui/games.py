@@ -6,6 +6,7 @@ import datetime
 
 import pandas as pd
 import streamlit as st
+from pydantic import ValidationError
 
 from auth import session as auth
 from config.settings import GAME_INNINGS
@@ -290,8 +291,8 @@ def _player_line_entry(client, game: dict, team_names: dict) -> None:
                         p_so=int(pso) if pitched else None,
                         p_hr=int(phr) if pitched else None,
                     ).for_insert()
-                except ValueError as exc:
-                    st.error(f"Invalid stat line: {exc}")
+                except ValidationError as exc:
+                    st.error(f"⚠️ {components.humanize_validation_error(exc)}")
                     return
                 stats_svc.upsert_player_game_stats(payload, client=client)
                 st.success(f"Saved {pname}'s line.")
