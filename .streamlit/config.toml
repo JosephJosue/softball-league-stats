@@ -1,0 +1,17 @@
+# Streamlit configuration.
+# Theme + server defaults tuned for a clean, mobile-first experience.
+
+[theme]
+base = "light"
+primaryColor = "#1f7a3d"          # softball/grass green accent
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f2f5f3"
+textColor = "#1a1a1a"
+font = "sans serif"
+
+[server]
+# Keep uploads reasonable for phone connections (PDF/Excel scorecards).
+maxUploadSize = 25                 # MB
+
+[browser]
+gatherUsageStats = false

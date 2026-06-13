@@ -1,0 +1,35 @@
+[project]
+name = "softball-league-stats"
+version = "0.1.0"
+description = "Production-ready Streamlit app for managing a softball league (stats, analytics, predictions). Backend: Supabase."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # --- Frontend / app framework ---
+    "streamlit>=1.40",
+    # --- Supabase (Postgres + Auth) client ---
+    "supabase>=2.10",
+    # --- Data processing & analytics ---
+    "pandas>=2.2",
+    "numpy>=2.0",
+    # --- Charts ---
+    "plotly>=5.24",
+    # --- Excel read/write (ingestion + export) ---
+    "openpyxl>=3.1",
+    # --- PDF scorecard parsing ---
+    "pdfplumber>=0.11",
+    # --- Config / validation ---
+    "python-dotenv>=1.0",
+    "pydantic>=2.9",
+]
+
+[dependency-groups]
+# Dev tooling installed with `uv sync` but not shipped to production.
+dev = [
+    "ruff>=0.7",
+    "pytest>=8.3",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

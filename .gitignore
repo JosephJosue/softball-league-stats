@@ -1,0 +1,34 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# --- Virtual environments (uv) ---
+.venv/
+venv/
+env/
+
+# --- Secrets / local config (NEVER commit these) ---
+.env
+.env.local
+.streamlit/secrets.toml
+
+# --- Tooling caches ---
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# --- App scratch / uploads ---
+*.log
+tmp/
+uploads/
