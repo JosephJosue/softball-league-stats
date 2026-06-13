@@ -7,12 +7,15 @@ Nothing is written until the admin clicks Import.
 
 from __future__ import annotations
 
+import datetime
+
 import pandas as pd
 import streamlit as st
 
 from auth import session as auth
-from ingestion import excel_parser, pdf_parser, validation
-from models.schemas import PlayerCreate
+from ingestion import excel_parser, gamechanger, pdf_parser, validation
+from ingestion.gamechanger import GameCard, PlayerStat
+from models.schemas import GameCreate, PlayerCreate, TeamCreate
 from services import games as games_svc
 from services import players as players_svc
 from services import positions as pos_svc
@@ -41,6 +44,15 @@ def render() -> None:
         return
 
     data = uploaded.getvalue()
+
+    # GameChanger scorecard PDFs get a dedicated full-game import flow.
+    if uploaded.name.lower().endswith(".pdf"):
+        card = gamechanger.parse(data)
+        if card and (card.away_players or card.home_players):
+            _render_game_import(client, card)
+            return
+        st.info("Not a recognized GameChanger scorecard — trying generic table extraction.")
+
     raw = _parse(uploaded.name, data)
     if raw is None or raw.empty:
         st.error("Couldn't extract a table from this file.")
@@ -141,6 +153,183 @@ def _new_player_editor(client, rows: list[dict]) -> dict[str, dict]:
             "position": er["Position"] or None,
         }
     return attrs
+
+
+# --------------------------------------------------------------------------
+# GameChanger full-game import
+# --------------------------------------------------------------------------
+
+def _side_df(players: list[PlayerStat]) -> pd.DataFrame:
+    """Preview table for one team's parsed players."""
+    return pd.DataFrame(
+        [
+            {
+                "Player": p.name, "Pos": p.position or "", "AB": p.ab, "R": p.r,
+                "H": p.h, "RBI": p.rbi, "BB": p.bb, "SO": p.so, "2B": p.doubles,
+                "3B": p.triples, "HR": p.hr, "E": p.errors,
+                "IP": p.ip if p.ip is not None else "", "ER": p.er if p.er is not None else "",
+            }
+            for p in players
+        ]
+    )
+
+
+def _render_game_import(client, card: GameCard) -> None:
+    st.success("GameChanger scorecard detected.")
+    st.markdown(f"### {card.away_team}  {card.away_score} – {card.home_score}  {card.home_team}")
+
+    teams_df = teams_svc.list_teams(client)
+    existing = list(teams_df["name"]) if not teams_df.empty else []
+    team_id_by_name = dict(zip(teams_df["name"], teams_df["id"])) if not teams_df.empty else {}
+
+    def _picker(label: str, parsed_name: str, key: str) -> str:
+        create_label = f"➕ Create '{parsed_name}'"
+        opts = [*existing, create_label]
+        default = parsed_name if parsed_name in existing else create_label
+        return st.selectbox(label, opts, index=opts.index(default), key=key)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        away_choice = _picker("Away team", card.away_team, "gc_away")
+    with c2:
+        home_choice = _picker("Home team", card.home_team, "gc_home")
+
+    gdate = st.date_input("Game date", value=card.date or datetime.date.today())
+    season = st.text_input("Season", placeholder="e.g. 2026-Spring")
+    create_missing = st.checkbox("Create players that don't exist yet", value=True)
+
+    st.markdown(f"**{card.away_team} — batting/pitching**")
+    st.dataframe(_side_df(card.away_players), use_container_width=True, hide_index=True)
+    st.markdown(f"**{card.home_team} — batting/pitching**")
+    st.dataframe(_side_df(card.home_players), use_container_width=True, hide_index=True)
+
+    if st.button("🚀 Import full game", use_container_width=True):
+        _do_game_import(
+            client, card,
+            away_choice=away_choice, home_choice=home_choice,
+            season=season.strip() or None, gdate=gdate, create_missing=create_missing,
+            team_id_by_name=team_id_by_name,
+        )
+
+
+def _resolve_team(client, choice: str, parsed_name: str, season, team_id_by_name: dict) -> str:
+    """Return a team id, creating the team if the '➕ Create' option was picked."""
+    if choice.startswith("➕ Create"):
+        created = teams_svc.create_team(
+            TeamCreate(name=parsed_name, season=season).for_insert(), client=client
+        )
+        return created["id"]
+    return team_id_by_name[choice]
+
+
+def _import_side(
+    client, players: list[PlayerStat], *, game_id: str, team_id: str,
+    pos_map: dict, create_missing: bool,
+) -> int:
+    """Create/match players for one team and upsert their stat lines."""
+    roster = players_svc.list_players(client, team_id=team_id)
+    name_to_id = (
+        {n.strip().lower(): i for n, i in zip(roster["name"], roster["id"])}
+        if not roster.empty
+        else {}
+    )
+    payloads: list[dict] = []
+    for p in players:
+        pos_code = p.position if p.position in pos_map else None
+        pid = name_to_id.get(p.name.strip().lower())
+        if not pid:
+            if not create_missing:
+                continue
+            created = players_svc.create_player(
+                PlayerCreate(
+                    name=p.name, team_id=team_id,
+                    primary_position_id=pos_map.get(pos_code) if pos_code else None,
+                    positions=[pos_code] if pos_code else None,
+                ).for_insert(),
+                client=client,
+            )
+            pid = created["id"]
+            name_to_id[p.name.strip().lower()] = pid
+
+        payload = {
+            "game_id": game_id, "player_id": pid, "team_id": team_id,
+            "position_id": pos_map.get(pos_code) if pos_code else None,
+            "ab": p.ab, "r": p.r, "h": p.h, "rbi": p.rbi, "bb": p.bb, "so": p.so,
+            "doubles": p.doubles, "triples": p.triples, "hr": p.hr, "errors": p.errors,
+        }
+        if p.ip is not None:
+            payload.update(
+                ip=p.ip, p_h=p.p_h, p_r=p.p_r, er=p.er,
+                p_bb=p.p_bb, p_so=p.p_so, p_hr=p.p_hr,
+            )
+        payloads.append(payload)
+    if payloads:
+        stats_svc.bulk_upsert_player_game_stats(payloads, client=client)
+    return len(payloads)
+
+
+def _do_game_import(
+    client, card: GameCard, *, away_choice, home_choice, season, gdate, create_missing,
+    team_id_by_name,
+) -> None:
+    away_id = _resolve_team(client, away_choice, card.away_team, season, team_id_by_name)
+    home_id = _resolve_team(client, home_choice, card.home_team, season, team_id_by_name)
+    pos_map = pos_svc.code_to_id(client)
+
+    # Reuse an existing game for the same date + teams, else create one.
+    games_df = games_svc.list_games(client)
+    game_id = None
+    if not games_df.empty:
+        match = games_df[
+            (games_df["game_date"] == gdate.isoformat())
+            & (games_df["home_team_id"] == home_id)
+            & (games_df["away_team_id"] == away_id)
+        ]
+        if not match.empty:
+            game_id = match.iloc[0]["id"]
+    payload = GameCreate(
+        game_date=gdate, season=season, away_team_id=away_id, home_team_id=home_id,
+        away_score=card.away_score, home_score=card.home_score, status="final",
+    ).for_insert()
+    if game_id:
+        games_svc.update_game(game_id, payload, client=client)
+    else:
+        game_id = games_svc.create_game(payload, client=client)["id"]
+
+    # Player stat lines.
+    n_away = _import_side(client, card.away_players, game_id=game_id, team_id=away_id,
+                          pos_map=pos_map, create_missing=create_missing)
+    n_home = _import_side(client, card.home_players, game_id=game_id, team_id=home_id,
+                          pos_map=pos_map, create_missing=create_missing)
+
+    # Line score (away = top, home = bottom).
+    for i, runs in enumerate(card.away_innings, start=1):
+        stats_svc.upsert_inning(
+            {"game_id": game_id, "team_id": away_id, "inning_number": i, "half": "top", "runs": runs},
+            client=client,
+        )
+    for i, runs in enumerate(card.home_innings, start=1):
+        stats_svc.upsert_inning(
+            {"game_id": game_id, "team_id": home_id, "inning_number": i, "half": "bottom", "runs": runs},
+            client=client,
+        )
+
+    # Team totals.
+    for team_id, score, totals, team_e, lob in [
+        (away_id, card.away_score, card.away_totals, card.away_team_e, card.away_lob),
+        (home_id, card.home_score, card.home_totals, card.home_team_e, card.home_lob),
+    ]:
+        stats_svc.upsert_team_game_stats(
+            {
+                "game_id": game_id, "team_id": team_id, "runs": score,
+                "hits": totals.get("h", 0), "errors": team_e or 0, "lob": lob or 0,
+                "ab": totals.get("ab", 0), "bb": totals.get("bb", 0), "so": totals.get("so", 0),
+            },
+            client=client,
+        )
+
+    st.success(f"Imported game: {n_away} away + {n_home} home stat lines, line score, and team totals.")
+    st.rerun()
 
 
 def _parse(filename: str, data: bytes):
