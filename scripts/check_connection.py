@@ -11,6 +11,13 @@ Expected: 12 positions (the seed), plus current team/player/game counts.
 
 from __future__ import annotations
 
+import pathlib
+import sys
+
+# Running a script file puts scripts/ (not the project root) on sys.path, so the
+# project packages aren't importable. Add the project root explicitly.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
 from config.settings import is_configured
 from services.analytics import player_season_totals
 from services.games import list_games
