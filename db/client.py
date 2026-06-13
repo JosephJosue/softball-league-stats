@@ -16,6 +16,17 @@ single shared instance per server process, not one per script rerun.
 
 from __future__ import annotations
 
+# Validate TLS against the OS certificate store before any client is created.
+# Centralized here so EVERY entry point that touches the DB (app, scripts,
+# tests) gets the fix — not just app.py. Fixes CERTIFICATE_VERIFY_FAILED on
+# corporate networks that do TLS inspection. No-op if truststore is absent.
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
 import streamlit as st
 from supabase import Client, create_client
 

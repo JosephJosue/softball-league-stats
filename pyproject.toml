@@ -35,3 +35,8 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.pytest.ini_options]
+# Add the project root to sys.path so tests can import utils/, models/, etc.
+pythonpath = ["."]
+testpaths = ["tests"]
