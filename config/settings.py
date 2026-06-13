@@ -66,6 +66,9 @@ def is_configured() -> bool:
 APP_TITLE = "Softball League Stats"
 APP_ICON = "🥎"
 
+# Regulation game length for this league (used for ERA scaling + line score).
+GAME_INNINGS = 6
+
 # Default number of recent games used by rolling-average predictions (Phase 5).
 ROLLING_WINDOW_GAMES = 5
 

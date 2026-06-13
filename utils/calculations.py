@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-# Softball games are typically 7 innings, so ERA is scaled to 7 (not 9 like MLB).
-DEFAULT_GAME_INNINGS = 7
+# Single source of truth for regulation game length (6 innings in this league).
+# ERA is scaled to this rather than MLB's 9.
+from config.settings import GAME_INNINGS
 
 
 def _safe_div(numerator: float, denominator: float, ndigits: int = 3) -> float:
@@ -80,7 +81,7 @@ def outs_to_ip(outs: int) -> float:
     return outs // 3 + (outs % 3) / 10
 
 
-def era(er: int, ip: float, innings: int = DEFAULT_GAME_INNINGS) -> float:
+def era(er: int, ip: float, innings: int = GAME_INNINGS) -> float:
     """ERA = ER * innings_per_game / IP (scaled to a full game)."""
     outs = ip_to_outs(ip)
     return round(er * innings * 3 / outs, 2) if outs else 0.0
