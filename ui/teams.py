@@ -77,6 +77,7 @@ def render() -> None:
                 name = st.text_input("Name", value=row.get("name", ""))
                 abbr = st.text_input("Abbreviation", value=row.get("abbreviation") or "")
                 season = st.text_input("Season", value=row.get("season") or "")
+                st.caption("⚠️ Deleting a team also deletes its players and their stats.")
                 c1, c2 = st.columns(2)
                 if c1.form_submit_button("Save", use_container_width=True):
                     teams_svc.update_team(

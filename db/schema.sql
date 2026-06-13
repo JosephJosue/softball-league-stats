@@ -43,7 +43,7 @@ create table if not exists teams (
 create table if not exists players (
     id                   uuid primary key default gen_random_uuid(),
     name                 text not null,
-    team_id              uuid references teams(id) on delete set null,
+    team_id              uuid not null references teams(id) on delete cascade,
     jersey_number        int,
     primary_position_id  uuid references positions(id),
     positions            text[],                        -- eligible position codes, e.g. {SS,2B}

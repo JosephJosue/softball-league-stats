@@ -42,7 +42,13 @@ def test_negative_counting_stat_rejected():
         PlayerGameStatsCreate(game_id="g", player_id="p", ab=-1)
 
 
-def test_player_bats_throws_patterns():
-    PlayerCreate(name="A", bats="S", throws="R")  # valid
+def test_player_requires_team():
+    PlayerCreate(name="A", team_id="t1", bats="S", throws="R")  # valid
     with pytest.raises(ValidationError):
-        PlayerCreate(name="B", bats="X")  # invalid handedness
+        PlayerCreate(name="A", bats="S")  # missing required team_id
+
+
+def test_player_bats_throws_patterns():
+    PlayerCreate(name="A", team_id="t1", bats="S", throws="R")  # valid
+    with pytest.raises(ValidationError):
+        PlayerCreate(name="B", team_id="t1", bats="X")  # invalid handedness

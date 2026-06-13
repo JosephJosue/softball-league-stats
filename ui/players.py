@@ -166,30 +166,33 @@ def _admin_section(client, roster) -> None:
     pos_opts = dict(zip(pos_df["code"], pos_df["id"])) if not pos_df.empty else {}
 
     with st.expander("➕ Add player"):
-        with st.form("add_player", clear_on_submit=True):
-            name = st.text_input("Name *")
-            team = st.selectbox("Team", ["—", *team_opts.keys()])
-            number = st.number_input("Jersey #", min_value=0, value=0, step=1)
-            positions = st.multiselect("Positions (defensive)", pos_codes)
-            c1, c2 = st.columns(2)
-            bats = c1.selectbox("Bats", ["—", "L", "R", "S"])
-            throws = c2.selectbox("Throws", ["—", "L", "R"])
-            if st.form_submit_button("Create player", use_container_width=True):
-                if not name.strip():
-                    st.error("Name is required.")
-                else:
-                    payload = PlayerCreate(
-                        name=name.strip(),
-                        team_id=team_opts.get(team),
-                        jersey_number=int(number) or None,
-                        primary_position_id=pos_opts.get(positions[0]) if positions else None,
-                        positions=positions or None,
-                        bats=None if bats == "—" else bats,
-                        throws=None if throws == "—" else throws,
-                    ).for_insert()
-                    players_svc.create_player(payload, client=client)
-                    st.success(f"Created {name}.")
-                    st.rerun()
+        if not team_opts:
+            st.info("Create a team first — every player must belong to a team.")
+        else:
+            with st.form("add_player", clear_on_submit=True):
+                name = st.text_input("Name *")
+                team = st.selectbox("Team *", list(team_opts.keys()))
+                number = st.number_input("Jersey #", min_value=0, value=0, step=1)
+                positions = st.multiselect("Positions (defensive)", pos_codes)
+                c1, c2 = st.columns(2)
+                bats = c1.selectbox("Bats", ["—", "L", "R", "S"])
+                throws = c2.selectbox("Throws", ["—", "L", "R"])
+                if st.form_submit_button("Create player", use_container_width=True):
+                    if not name.strip():
+                        st.error("Name is required.")
+                    else:
+                        payload = PlayerCreate(
+                            name=name.strip(),
+                            team_id=team_opts[team],
+                            jersey_number=int(number) or None,
+                            primary_position_id=pos_opts.get(positions[0]) if positions else None,
+                            positions=positions or None,
+                            bats=None if bats == "—" else bats,
+                            throws=None if throws == "—" else throws,
+                        ).for_insert()
+                        players_svc.create_player(payload, client=client)
+                        st.success(f"Created {name}.")
+                        st.rerun()
 
     if not roster.empty:
         with st.expander("✏️ Edit / delete player"):
@@ -199,8 +202,8 @@ def _admin_section(client, roster) -> None:
             with st.form("edit_player"):
                 name = st.text_input("Name", value=row.get("name", ""))
                 team_keys = list(team_opts.keys())
-                cur_team = next((k for k, v in team_opts.items() if v == row.get("team_id")), "—")
-                team = st.selectbox("Team", ["—", *team_keys], index=(["—", *team_keys].index(cur_team)))
+                cur_team = next((k for k, v in team_opts.items() if v == row.get("team_id")), team_keys[0])
+                team = st.selectbox("Team *", team_keys, index=team_keys.index(cur_team))
                 jersey = row.get("jersey_number")
                 number = st.number_input(
                     "Jersey #", min_value=0, value=int(jersey) if pd.notna(jersey) else 0, step=1
@@ -224,7 +227,7 @@ def _admin_section(client, roster) -> None:
                         names[sel],
                         {
                             "name": name.strip(),
-                            "team_id": team_opts.get(team),
+                            "team_id": team_opts[team],
                             "jersey_number": int(number) or None,
                             "primary_position_id": pos_opts.get(positions[0]) if positions else None,
                             "positions": positions or None,

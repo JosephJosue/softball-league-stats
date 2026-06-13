@@ -95,6 +95,8 @@ the Supabase SQL Editor (new installs already include them via `schema.sql`):
   defensive positions) column.
 - `002_unique_games.sql` — removes duplicate games and adds a unique index on
   `(game_date, home_team_id, away_team_id)` so a matchup can't be imported twice.
+- `003_player_team_required.sql` — makes `players.team_id` NOT NULL and the FK
+  `ON DELETE CASCADE` (every player has one team; deleting a team deletes them).
 
 ---
 

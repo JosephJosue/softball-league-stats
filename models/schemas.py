@@ -54,7 +54,7 @@ class Team(TeamCreate):
 
 class PlayerCreate(_Payload):
     name: str
-    team_id: str | None = None
+    team_id: str  # required: every player belongs to exactly one team
     jersey_number: int | None = None
     primary_position_id: str | None = None
     positions: list[str] | None = None  # eligible position codes, e.g. ["SS", "2B"]
