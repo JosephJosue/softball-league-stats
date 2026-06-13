@@ -191,16 +191,18 @@ def _admin_game_entry(client, game: dict, team_names: dict) -> None:
 def _line_score_editor(client, game: dict, team_names: dict) -> None:
     with st.expander("Line score (runs by inning)"):
         innings = stats_svc.list_innings(game["id"], client=client)
+        has_innings = not innings.empty and "team_id" in innings.columns
         editable = {}
         for team_id, half in [
             (game.get("away_team_id"), "top"),
             (game.get("home_team_id"), "bottom"),
         ]:
             label = team_names.get(team_id, half)
-            existing = innings[innings["team_id"] == team_id]
             row = {str(n): 0 for n in range(1, GAME_INNINGS + 1)}
-            for _, r in existing.iterrows():
-                row[str(int(r["inning_number"]))] = int(r["runs"])
+            if has_innings:
+                existing = innings[innings["team_id"] == team_id]
+                for _, r in existing.iterrows():
+                    row[str(int(r["inning_number"]))] = int(r["runs"])
             editable[label] = row
         df = pd.DataFrame(editable).T
         edited = st.data_editor(df, use_container_width=True, key="line_editor")
