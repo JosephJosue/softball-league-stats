@@ -8,6 +8,17 @@ Phase 3.
 
 from __future__ import annotations
 
+# Validate TLS against the OS certificate store instead of the bundled certifi
+# certs. This fixes "CERTIFICATE_VERIFY_FAILED" on corporate networks that do
+# TLS inspection (their internal root CA lives in the OS store, not in certifi).
+# Best-effort: a no-op if truststore isn't installed, so it never breaks startup.
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except Exception:
+    pass
+
 import streamlit as st
 
 from config.settings import (

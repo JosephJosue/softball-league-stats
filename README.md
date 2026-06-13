@@ -88,6 +88,22 @@ The app opens in your browser. On the Phase 1 scaffold you should see a green
 
 ---
 
+## Troubleshooting
+
+**`SSL: CERTIFICATE_VERIFY_FAILED` / "unable to get local issuer certificate"**
+
+Common on corporate networks that do TLS inspection — their internal root CA is
+trusted by your OS/browser but not by Python's bundled `certifi` certs. The app
+ships with [`truststore`](https://truststore.readthedocs.io/) and calls
+`truststore.inject_into_ssl()` at startup, which makes Python validate against the
+**OS certificate store** (where the corporate CA already lives). After pulling
+this change, run `uv sync` and restart the app. If you still see the error, your
+OS may be missing the corporate root CA — ask IT, or as a fallback point Python at
+a CA bundle: `export SSL_CERT_FILE=/path/to/corp-ca.pem` (Windows PowerShell:
+`$env:SSL_CERT_FILE="C:\path\to\corp-ca.pem"`).
+
+---
+
 ## Build phases
 
 This project is built and reviewed in phases:

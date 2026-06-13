@@ -21,6 +21,8 @@ dependencies = [
     # --- Config / validation ---
     "python-dotenv>=1.0",
     "pydantic>=2.9",
+    # --- TLS: trust the OS cert store (fixes SSL errors behind corp proxies) ---
+    "truststore>=0.10.4",
 ]
 
 [dependency-groups]
