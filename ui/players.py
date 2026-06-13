@@ -130,6 +130,15 @@ def _admin_section(client, roster) -> None:
                 jersey = row.get("jersey_number")
                 jersey_val = int(jersey) if pd.notna(jersey) else 0
                 number = st.number_input("Jersey #", min_value=0, value=jersey_val, step=1)
+
+                bats_opts = ["—", "L", "R", "S"]
+                throws_opts = ["—", "L", "R"]
+                cur_bats = row.get("bats") if row.get("bats") in bats_opts else "—"
+                cur_throws = row.get("throws") if row.get("throws") in throws_opts else "—"
+                bc, tc = st.columns(2)
+                bats = bc.selectbox("Bats", bats_opts, index=bats_opts.index(cur_bats))
+                throws = tc.selectbox("Throws", throws_opts, index=throws_opts.index(cur_throws))
+
                 active = st.checkbox("Active", value=bool(row.get("active", True)))
                 c1, c2 = st.columns(2)
                 if c1.form_submit_button("Save", use_container_width=True):
@@ -139,6 +148,8 @@ def _admin_section(client, roster) -> None:
                             "name": name.strip(),
                             "team_id": team_opts.get(team),
                             "jersey_number": int(number) or None,
+                            "bats": None if bats == "—" else bats,
+                            "throws": None if throws == "—" else throws,
                             "active": active,
                         },
                         client=client,
