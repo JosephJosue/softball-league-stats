@@ -1,15 +1,15 @@
 """Softball League Stats — Streamlit entry point.
 
-Phase 1 placeholder: verifies configuration and Supabase connectivity, and
-establishes the mobile-first page setup + sidebar navigation shell. The real
-pages (Dashboard, Teams, Players, Games, Upload, Predictions) are wired up in
-Phase 3.
+Sets up mobile-first page config, the sidebar (navigation + admin login), and
+routes to the page render functions in ui/. Pages read via auth.get_db() and
+reveal admin controls only when auth.is_admin() is true.
 """
 
 from __future__ import annotations
 
 import streamlit as st
 
+from auth import session as auth
 from config.settings import (
     APP_ICON,
     APP_TITLE,
@@ -21,8 +21,10 @@ from config.settings import (
     NAV_UPLOAD,
     is_configured,
 )
+from ui import dashboard, games, players, predictions, teams, upload
 
-# Mobile-first: "centered" layout reads far better than "wide" on phones.
+# Mobile-first: centered layout reads best on phones; sidebar collapses to a
+# hamburger automatically on small screens.
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon=APP_ICON,
@@ -30,56 +32,58 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Map nav labels -> page render functions.
+PAGES = {
+    NAV_DASHBOARD: dashboard.render,
+    NAV_TEAMS: teams.render,
+    NAV_PLAYERS: players.render,
+    NAV_GAMES: games.render,
+    NAV_UPLOAD: upload.render,
+    NAV_PREDICTIONS: predictions.render,
+}
 
-def _check_connection() -> None:
-    """Show Supabase configuration / connectivity status (Phase 1 smoke test)."""
-    if not is_configured():
-        st.warning(
-            "Supabase is not configured yet. Copy `.env.example` to `.env` "
-            "(or `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml`) "
-            "and add your `SUPABASE_URL` and `SUPABASE_ANON_KEY`."
-        )
-        return
 
-    try:
-        from db.client import get_client
-
-        client = get_client()
-        # Lightweight read against the seeded reference table.
-        result = client.table("positions").select("code").limit(1).execute()
-        if result.data:
-            st.success("Connected to Supabase ✅ (schema detected).")
-        else:
-            st.info(
-                "Connected to Supabase, but no positions found. "
-                "Did you run `db/schema.sql` in the SQL Editor?"
-            )
-    except Exception as exc:  # noqa: BLE001 - surface any setup error to the user
-        st.error(f"Could not reach Supabase: {exc}")
+def _sidebar_auth() -> None:
+    """Admin login / logout panel in the sidebar."""
+    st.divider()
+    if auth.is_admin():
+        st.success(f"Admin: {auth.current_email()}")
+        if st.button("Log out", use_container_width=True):
+            auth.logout()
+            st.rerun()
+    else:
+        with st.expander("🔐 Admin login"):
+            with st.form("login_form"):
+                email = st.text_input("Email")
+                password = st.text_input("Password", type="password")
+                if st.form_submit_button("Log in", use_container_width=True):
+                    ok, msg = auth.login(email, password)
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        st.caption("Viewers can browse all stats without logging in.")
 
 
 def main() -> None:
-    # Sidebar navigation shell (pages wired up in Phase 3).
-    pages = [
-        NAV_DASHBOARD,
-        NAV_TEAMS,
-        NAV_PLAYERS,
-        NAV_GAMES,
-        NAV_UPLOAD,
-        NAV_PREDICTIONS,
-    ]
+    if not is_configured():
+        st.error(
+            "Supabase is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY "
+            "in `.env` or `.streamlit/secrets.toml`, then restart."
+        )
+        return
+
     with st.sidebar:
         st.title(f"{APP_ICON} {APP_TITLE}")
-        choice = st.radio("Navigate", pages, label_visibility="collapsed")
-        st.caption("Admin login arrives in Phase 2.")
+        choice = st.radio("Navigate", list(PAGES), label_visibility="collapsed")
+        _sidebar_auth()
 
     st.title(f"{APP_ICON} {APP_TITLE}")
-    st.subheader(choice)
-    _check_connection()
-    st.info(
-        "Phase 1 scaffold is live. Backend services and pages are built in "
-        "the next phases."
-    )
+    try:
+        PAGES[choice]()
+    except Exception as exc:  # noqa: BLE001 - show errors in-app instead of crashing
+        st.error(f"Something went wrong rendering this page: {exc}")
 
 
 if __name__ == "__main__":
