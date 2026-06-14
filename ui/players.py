@@ -14,7 +14,7 @@ from services import positions as pos_svc
 from services import stats as stats_svc
 from services import teams as teams_svc
 from ui import components
-from utils import filters
+from utils import calculations, filters
 
 
 def _as_list(value) -> list[str]:
@@ -153,6 +153,37 @@ def _defense_view(client, player: dict, lines: pd.DataFrame) -> None:
     components.metric_row([("Appearances", int(len(d))), ("Total errors", int(d["errors"].sum()))], per_row=2)
     st.markdown("**By position**")
     st.dataframe(summary, use_container_width=True, hide_index=True)
+
+    # Pitching (also a defensive role) — only when the player has pitched.
+    _pitching_view(d)
+
+
+def _pitching_view(lines: pd.DataFrame) -> None:
+    """Aggregate pitching stats from a player's game lines, if any."""
+    if "ip" not in lines.columns:
+        return
+    pitched = lines[lines["ip"].notna()]
+    if pitched.empty:
+        return
+
+    # Sum innings correctly via outs (.1/.2 are thirds, not decimals).
+    total_outs = sum(calculations.ip_to_outs(float(x)) for x in pitched["ip"])
+    ip_total = calculations.outs_to_ip(total_outs)
+    er = int(pitched["er"].fillna(0).sum())
+    era = calculations.era(er, ip_total)
+
+    def _sum(col: str) -> int:
+        return int(pitched[col].fillna(0).sum()) if col in pitched.columns else 0
+
+    st.markdown("**Pitching**")
+    components.metric_row(
+        [("Apps", int(len(pitched))), ("IP", ip_total), ("ERA", f"{era:.2f}")], per_row=3
+    )
+    components.metric_row(
+        [("H", _sum("p_h")), ("R", _sum("p_r")), ("ER", er),
+         ("BB", _sum("p_bb")), ("SO", _sum("p_so")), ("HR", _sum("p_hr"))],
+        per_row=3,
+    )
 
 
 def _admin_section(client, roster) -> None:

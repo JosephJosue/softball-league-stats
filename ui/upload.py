@@ -15,6 +15,7 @@ import streamlit as st
 from auth import session as auth
 from ingestion import excel_parser, gamechanger, pdf_parser, validation
 from ingestion.gamechanger import GameCard, PlayerStat
+from ingestion.matching import find_match, normalize_name
 from models.schemas import GameCreate, PlayerCreate, TeamCreate
 from services import games as games_svc
 from services import players as players_svc
@@ -228,35 +229,61 @@ def _resolve_team(client, choice: str, parsed_name: str, season, team_id_by_name
     )["id"]
 
 
+def _roster_cache(client, team_id: str) -> list[dict]:
+    """Existing players on a team as [{id, name, nkey}] for fuzzy matching."""
+    df = players_svc.list_players(client, team_id=team_id)
+    if df.empty:
+        return []
+    return [
+        {"id": i, "name": n, "nkey": normalize_name(n)}
+        for n, i in zip(df["name"], df["id"])
+    ]
+
+
+def _resolve_or_create(client, name: str, cache: list[dict], create_missing: bool, build_kwargs) -> str | None:
+    """Match a name to an existing player (prefix-aware) or create one.
+
+    When a fuller name arrives for an already-stored truncated one (e.g.
+    'Leonardo Vásquez' for 'Leonardo V'), the stored name is upgraded so the
+    roster converges on the most complete spelling.
+    """
+    nkey = normalize_name(name)
+    if not nkey:
+        return None
+    match = find_match(nkey, cache)
+    if match:
+        if len(nkey) > len(match["nkey"]):  # incoming name is fuller -> upgrade
+            players_svc.update_player(match["id"], {"name": name}, client=client)
+            match["name"], match["nkey"] = name, nkey
+        return match["id"]
+    if not create_missing:
+        return None
+    created = players_svc.create_player(
+        PlayerCreate(name=name, **build_kwargs()).for_insert(), client=client
+    )
+    cache.append({"id": created["id"], "name": name, "nkey": nkey})
+    return created["id"]
+
+
 def _import_side(
     client, players: list[PlayerStat], *, game_id: str, team_id: str,
     pos_map: dict, create_missing: bool,
 ) -> int:
-    """Create/match players for one team and upsert their stat lines."""
-    roster = players_svc.list_players(client, team_id=team_id)
-    name_to_id = (
-        {n.strip().lower(): i for n, i in zip(roster["name"], roster["id"])}
-        if not roster.empty
-        else {}
-    )
+    """Create/match players for one team (fuzzy) and upsert their stat lines."""
+    cache = _roster_cache(client, team_id)
     payloads: list[dict] = []
     for p in players:
         pos_code = p.position if p.position in pos_map else None
-        pid = name_to_id.get(p.name.strip().lower())
+        pid = _resolve_or_create(
+            client, p.name, cache, create_missing,
+            lambda team_id=team_id, pos_code=pos_code: dict(
+                team_id=team_id,
+                primary_position_id=pos_map.get(pos_code) if pos_code else None,
+                positions=[pos_code] if pos_code else None,
+            ),
+        )
         if not pid:
-            if not create_missing:
-                continue
-            created = players_svc.create_player(
-                PlayerCreate(
-                    name=p.name, team_id=team_id,
-                    primary_position_id=pos_map.get(pos_code) if pos_code else None,
-                    positions=[pos_code] if pos_code else None,
-                ).for_insert(),
-                client=client,
-            )
-            pid = created["id"]
-            name_to_id[p.name.strip().lower()] = pid
-
+            continue
         payload = {
             "game_id": game_id, "player_id": pid, "team_id": team_id,
             "position_id": pos_map.get(pos_code) if pos_code else None,
@@ -370,15 +397,10 @@ def _do_import(
     create_missing: bool,
     new_attrs: dict[str, dict],
 ) -> None:
-    """Resolve names -> IDs (creating players if asked) and bulk upsert."""
-    players_df = players_svc.list_players(client)
-    player_map = (
-        {n.strip().lower(): i for n, i in zip(players_df["name"], players_df["id"])}
-        if not players_df.empty
-        else {}
-    )
+    """Resolve names -> IDs (fuzzy, creating players if asked) and bulk upsert."""
     team_lower = {n.strip().lower(): i for n, i in team_opts.items()}
     pos_map = pos_svc.code_to_id(client)
+    caches: dict[str, list[dict]] = {}  # per-team roster cache for fuzzy matching
 
     payloads: list[dict] = []
     skipped: list[str] = []
@@ -386,28 +408,24 @@ def _do_import(
     for row in rows:
         name = row["player_name"]
         team_id = team_lower.get(str(row.get("team_name", "")).lower(), default_team_id)
+        cache = caches.setdefault(team_id, _roster_cache(client, team_id))
 
-        player_id = player_map.get(name.lower())
+        attrs = new_attrs.get(name.lower(), {})
+        roster_pos = attrs.get("position")
+        player_id = _resolve_or_create(
+            client, name, cache, create_missing,
+            lambda team_id=team_id, attrs=attrs, roster_pos=roster_pos: dict(
+                team_id=team_id,
+                jersey_number=attrs.get("jersey"),
+                bats=attrs.get("bats"),
+                throws=attrs.get("throws"),
+                primary_position_id=pos_map.get(roster_pos) if roster_pos else None,
+                positions=[roster_pos] if roster_pos else None,
+            ),
+        )
         if not player_id:
-            if not create_missing:
-                skipped.append(name)
-                continue
-            attrs = new_attrs.get(name.lower(), {})
-            pos_code = attrs.get("position")
-            created = players_svc.create_player(
-                PlayerCreate(
-                    name=name,
-                    team_id=team_id,
-                    jersey_number=attrs.get("jersey"),
-                    bats=attrs.get("bats"),
-                    throws=attrs.get("throws"),
-                    primary_position_id=pos_map.get(pos_code) if pos_code else None,
-                    positions=[pos_code] if pos_code else None,
-                ).for_insert(),
-                client=client,
-            )
-            player_id = created["id"]
-            player_map[name.lower()] = player_id
+            skipped.append(name)
+            continue
 
         payload = {
             "game_id": game_id,
