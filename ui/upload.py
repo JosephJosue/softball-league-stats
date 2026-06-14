@@ -371,18 +371,22 @@ def _roster_cache(client, team_id: str) -> list[dict]:
     ]
 
 
-def _resolve_or_create(client, name: str, cache: list[dict], create_missing: bool, build_kwargs) -> str | None:
+def _resolve_or_create(client, name: str, cache: list[dict], create_missing: bool, build_kwargs, used_ids: set) -> str | None:
     """Match a name to an existing player (prefix-aware) or create one.
 
+    `used_ids` holds player ids already claimed in this import. If a name would
+    match a player that's already been used (e.g. ambiguous 'Juan Diego T' and
+    'Juan Diego V' both matching a stored 'Juan Diego'), we create a distinct
+    player instead — avoiding a duplicate (game_id, player_id) in the upsert.
+
     When a fuller name arrives for an already-stored truncated one (e.g.
-    'Leonardo Vásquez' for 'Leonardo V'), the stored name is upgraded so the
-    roster converges on the most complete spelling.
+    'Leonardo Vásquez' for 'Leonardo V'), the stored name is upgraded.
     """
     nkey = normalize_name(name)
     if not nkey:
         return None
     match = find_match(nkey, cache)
-    if match:
+    if match and match["id"] not in used_ids:
         if len(nkey) > len(match["nkey"]):  # incoming name is fuller -> upgrade
             players_svc.update_player(match["id"], {"name": name}, client=client)
             match["name"], match["nkey"] = name, nkey
@@ -402,6 +406,7 @@ def _import_side(
 ) -> int:
     """Create/match players for one team (fuzzy) and upsert their stat lines."""
     cache = _roster_cache(client, team_id)
+    used_ids: set = set()
     payloads: list[dict] = []
     for p in players:
         pos_code = p.position if p.position in pos_map else None
@@ -412,9 +417,11 @@ def _import_side(
                 primary_position_id=pos_map.get(pos_code) if pos_code else None,
                 positions=[pos_code] if pos_code else None,
             ),
+            used_ids,
         )
-        if not pid:
+        if not pid or pid in used_ids:
             continue
+        used_ids.add(pid)
         payload = {
             "game_id": game_id, "player_id": pid, "team_id": team_id,
             "position_id": pos_map.get(pos_code) if pos_code else None,
@@ -534,6 +541,7 @@ def _do_import(
     team_lower = {n.strip().lower(): i for n, i in team_opts.items()}
     pos_map = pos_svc.code_to_id(client)
     caches: dict[str, list[dict]] = {}  # per-team roster cache for fuzzy matching
+    used_ids: set = set()  # players already claimed in this import (one game)
 
     payloads: list[dict] = []
     skipped: list[str] = []
@@ -555,10 +563,12 @@ def _do_import(
                 primary_position_id=pos_map.get(roster_pos) if roster_pos else None,
                 positions=[roster_pos] if roster_pos else None,
             ),
+            used_ids,
         )
-        if not player_id:
+        if not player_id or player_id in used_ids:
             skipped.append(name)
             continue
+        used_ids.add(player_id)
 
         payload = {
             "game_id": game_id,
