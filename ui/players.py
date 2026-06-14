@@ -63,35 +63,39 @@ def render() -> None:
 def _skill_scores(client, player_id: str) -> dict[str, float] | None:
     """Six skill axes as league percentile ranks (0-100) for the radar chart.
 
-    Blends offense and defense. Rate stats avoid favoring players with more
-    games; defense uses errors-per-game inverted (fewer errors -> higher).
+    Aggregates each player ACROSS seasons first (the season view has one row per
+    player+season), then computes rate-based axes and percentile-ranks them.
     """
     df = analytics.player_season_totals(client)
     if df.empty or player_id not in set(df["player_id"]):
         return None
-    d = df.copy()
-    games = d["games"].replace(0, pd.NA)
-    d["bb_rate"] = d["bb"] / (d["ab"] + d["bb"]).replace(0, pd.NA)
-    d["rbi_pg"] = d["rbi"] / games
-    # Defense: errors per defensive inning (better normalization than per game);
-    # fall back to per-game when innings aren't recorded.
-    if "innings_played" in d.columns:
-        denom = d["innings_played"].where(d["innings_played"] > 0, d["games"]).replace(0, pd.NA)
-    else:
-        denom = games
-    d["def_inv"] = -(d["errors"] / denom)  # fewer errors ranks higher
+    cols = ["ab", "h", "bb", "tb", "rbi", "errors", "games", "innings_played"]
+    for c in cols:
+        if c not in df.columns:
+            df[c] = 0
+    agg = df.groupby("player_id", as_index=False)[cols].sum()
+
+    ab = agg["ab"].replace(0, pd.NA)
+    abbb = (agg["ab"] + agg["bb"]).replace(0, pd.NA)
+    games = agg["games"].replace(0, pd.NA)
+    agg["contact"] = agg["h"] / ab
+    agg["power"] = agg["tb"] / ab
+    agg["onbase"] = (agg["h"] + agg["bb"]) / abbb
+    agg["discipline"] = agg["bb"] / abbb
+    agg["production"] = agg["rbi"] / games
+    denom = agg["innings_played"].where(agg["innings_played"] > 0, agg["games"]).replace(0, pd.NA)
+    agg["defense"] = -(agg["errors"] / denom)  # fewer errors per inning ranks higher
 
     axes = {
-        "Contact": "avg",
-        "Power": "slg",
-        "On-Base": "obp",
-        "Discipline": "bb_rate",
-        "Production": "rbi_pg",
-        "Defense": "def_inv",
+        "Contact": "contact", "Power": "power", "On-Base": "onbase",
+        "Discipline": "discipline", "Production": "production", "Defense": "defense",
     }
-    ranks = pd.DataFrame({label: (d[col].rank(pct=True) * 100).round(0) for label, col in axes.items()})
-    ranks["player_id"] = d["player_id"].values
-    row = ranks[ranks["player_id"] == player_id].iloc[0]
+    ranks = pd.DataFrame({label: (agg[col].rank(pct=True) * 100).round(0) for label, col in axes.items()})
+    ranks["player_id"] = agg["player_id"].values
+    row = ranks[ranks["player_id"] == player_id]
+    if row.empty:
+        return None
+    row = row.iloc[0]
     return {label: float(row[label]) if pd.notna(row[label]) else 0.0 for label in axes}
 
 
@@ -126,13 +130,15 @@ def _offense_view(client, player_id: str, player_name: str, lines: pd.DataFrame)
     totals = analytics.player_season_totals(client)
     mine = totals[totals["player_id"] == player_id] if not totals.empty else totals
     if not mine.empty:
-        agg = mine.iloc[0]
+        # Sum across season rows (a player can span more than one season group).
+        s = mine[["ab", "h", "bb", "tb", "rbi", "hr"]].sum()
+        rates = calculations.rate_stats(_int(s["ab"]), _int(s["h"]), _int(s["bb"]), _int(s["tb"]))
         components.metric_row(
-            [("AVG", _rate(agg["avg"])), ("OBP", _rate(agg["obp"])), ("OPS", _rate(agg["ops"])),
-             ("HR", _int(agg["hr"])), ("RBI", _int(agg["rbi"])), ("H", _int(agg["h"]))],
+            [("AVG", _rate(rates["avg"])), ("OBP", _rate(rates["obp"])), ("OPS", _rate(rates["ops"])),
+             ("HR", _int(s["hr"])), ("RBI", _int(s["rbi"])), ("H", _int(s["h"]))],
             per_row=3,
         )
-        if _int(agg["ab"]) == 0:
+        if _int(s["ab"]) == 0:
             st.caption("No at-bats recorded — rate stats shown as .000.")
     else:
         st.caption("No batting stats recorded yet for this player.")
