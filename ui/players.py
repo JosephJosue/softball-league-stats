@@ -60,11 +60,11 @@ def render() -> None:
         _admin_section(client, roster)
 
 
-def _skill_scores(client, player_id: str) -> dict[str, float] | None:
-    """Six skill axes as league percentile ranks (0-100) for the radar chart.
+def _skill_scores(client, player_id: str, scope: str = "League") -> dict[str, float] | None:
+    """Six skill axes as percentile ranks (0-100) for the radar chart.
 
-    Aggregates each player ACROSS seasons first (the season view has one row per
-    player+season), then computes rate-based axes and percentile-ranks them.
+    Aggregates each player ACROSS seasons first, then percentile-ranks them
+    against either the whole league or just the player's own team (`scope`).
     """
     df = analytics.player_season_totals(client)
     if df.empty or player_id not in set(df["player_id"]):
@@ -73,7 +73,14 @@ def _skill_scores(client, player_id: str) -> dict[str, float] | None:
     for c in cols:
         if c not in df.columns:
             df[c] = 0
-    agg = df.groupby("player_id", as_index=False)[cols].sum()
+    if "team_id" not in df.columns:
+        df["team_id"] = None
+    agg = df.groupby("player_id", as_index=False).agg({**{c: "sum" for c in cols}, "team_id": "first"})
+
+    # Restrict the comparison pool to teammates when scope == "Team".
+    if scope == "Team":
+        team_id = agg.loc[agg["player_id"] == player_id, "team_id"].iloc[0]
+        agg = agg[agg["team_id"] == team_id]
 
     ab = agg["ab"].replace(0, pd.NA)
     abbb = (agg["ab"] + agg["bb"]).replace(0, pd.NA)
@@ -104,10 +111,15 @@ def _player_detail(client, player_id: str, player_name: str) -> None:
     player = players_svc.get_player(player_id, client=client) or {}
     lines = stats_svc.list_player_game_stats(client, player_id=player_id)
 
-    # Skill radar (league percentile across 6 axes).
-    scores = _skill_scores(client, player_id)
+    # Skill radar (percentile across 6 axes) with a comparison-scope toggle.
+    scope = st.radio(
+        "Compare against", ["League", "Team"], horizontal=True, key="radar_scope",
+        help="Rank this player vs. the whole league or just his own teammates.",
+    )
+    scores = _skill_scores(client, player_id, scope=scope)
     if scores:
-        st.caption("Skill profile — percentile rank vs. the league (0–100).")
+        baseline = "teammates" if scope == "Team" else "the league"
+        st.caption(f"Skill profile — percentile rank vs. {baseline} (0–100).")
         st.plotly_chart(components.skill_radar(scores), use_container_width=True)
 
     tab_off, tab_def = st.tabs(["⚾ Offense", "🧤 Defense"])
