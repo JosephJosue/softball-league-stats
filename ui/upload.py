@@ -162,18 +162,57 @@ def _new_player_editor(client, rows: list[dict]) -> dict[str, dict]:
 # --------------------------------------------------------------------------
 
 def _side_df(players: list[PlayerStat]) -> pd.DataFrame:
-    """Preview table for one team's parsed players."""
+    """Editable preview table for one team (all batting + pitching fields)."""
     return pd.DataFrame(
         [
             {
-                "Player": p.name, "Pos": p.position or "", "AB": p.ab, "R": p.r,
-                "H": p.h, "RBI": p.rbi, "BB": p.bb, "SO": p.so, "2B": p.doubles,
-                "3B": p.triples, "HR": p.hr, "E": p.errors,
-                "IP": p.ip if p.ip is not None else "", "ER": p.er if p.er is not None else "",
+                "Player": p.name, "Pos": p.position or "",
+                "AB": p.ab, "R": p.r, "H": p.h, "RBI": p.rbi, "BB": p.bb, "SO": p.so,
+                "2B": p.doubles, "3B": p.triples, "HR": p.hr, "E": p.errors,
+                "IP": p.ip, "P_H": p.p_h, "P_R": p.p_r, "ER": p.er,
+                "P_BB": p.p_bb, "P_SO": p.p_so, "P_HR": p.p_hr,
             }
             for p in players
         ]
     )
+
+
+# Columns that map to integer stat fields (df column -> PlayerStat attr).
+_BAT_COLS = {
+    "AB": "ab", "R": "r", "H": "h", "RBI": "rbi", "BB": "bb", "SO": "so",
+    "2B": "doubles", "3B": "triples", "HR": "hr", "E": "errors",
+}
+_PIT_COLS = {"P_H": "p_h", "P_R": "p_r", "ER": "er", "P_BB": "p_bb", "P_SO": "p_so", "P_HR": "p_hr"}
+
+
+def _rows_to_players(originals: list[PlayerStat], edited: pd.DataFrame, valid_pos: set[str]) -> list[PlayerStat]:
+    """Rebuild PlayerStat records from the edited table (all fields applied)."""
+    out: list[PlayerStat] = []
+    for orig, (_, row) in zip(originals, edited.iterrows()):
+        name = str(row.get("Player") or "").strip() or orig.name
+        pos = str(row.get("Pos") or "").strip().upper() or None
+        if pos not in valid_pos:
+            pos = None
+        bat = {attr: (int(row[col]) if pd.notna(row[col]) else 0) for col, attr in _BAT_COLS.items()}
+
+        ip_val = row.get("IP")
+        ip = float(ip_val) if pd.notna(ip_val) else None
+        if ip is not None:
+            pit = {attr: (int(row[col]) if pd.notna(row[col]) else 0) for col, attr in _PIT_COLS.items()}
+        else:
+            pit = {attr: None for attr in _PIT_COLS.values()}
+
+        out.append(replace(orig, name=name, position=pos, ip=ip, **bat, **pit))
+    return out
+
+
+def _editor_config(pos_codes: list[str]) -> dict:
+    num = st.column_config.NumberColumn(min_value=0, step=1)
+    cfg = {col: num for col in [*_BAT_COLS, *_PIT_COLS]}
+    cfg["IP"] = st.column_config.NumberColumn(min_value=0.0, step=0.1, format="%.1f")
+    cfg["Pos"] = st.column_config.SelectboxColumn(options=["", *pos_codes])
+    cfg["Player"] = st.column_config.TextColumn()
+    return cfg
 
 
 def _render_game_import(client, card: GameCard) -> None:
@@ -230,17 +269,17 @@ def _editable_side(
     Shows whether each (possibly edited) name will merge into an existing roster
     player or be created new, so the admin can resolve ambiguous names first.
     """
-    st.markdown(f"**{team_label} — batting/pitching** (Player names are editable)")
+    st.markdown(f"**{team_label} — batting/pitching** (all fields editable)")
+    pos_codes = pos_svc.list_positions(client)["code"].tolist()
     df = _side_df(players)
     edited = st.data_editor(
         df,
         hide_index=True,
         use_container_width=True,
-        disabled=[c for c in df.columns if c != "Player"],
+        column_config=_editor_config(pos_codes),
         key=key,
     )
-    names = list(edited["Player"])
-    result = [replace(p, name=str(nm).strip() or p.name) for p, nm in zip(players, names)]
+    result = _rows_to_players(players, edited, set(pos_codes))
 
     # Live "where will this land" feedback against the chosen team's roster.
     cache = _roster_cache(client, team_id) if team_id else []
