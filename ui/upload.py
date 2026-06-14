@@ -309,13 +309,24 @@ def _editable_side(
     # Live "where will this land" feedback against the chosen team's roster.
     cache = _roster_cache(client, team_id) if team_id else []
     merges = []
+    ambiguous = []
     for q in result:
-        m = find_match(normalize_name(q.name), cache)
+        nk = normalize_name(q.name)
+        cands = [e for e in cache if e["nkey"] and (e["nkey"].startswith(nk) or nk.startswith(e["nkey"]))]
+        m = find_match(nk, cache)
         if m:
             merges.append(f"{q.name} → {m['name']}")
+        elif len(cands) > 1:
+            ambiguous.append(f"'{q.name}' matches {', '.join(e['name'] for e in cands)}")
     if merges:
         st.caption("Will update existing players: " + "; ".join(merges))
     st.caption(f"{len(result) - len(merges)} new player(s), {len(merges)} matched.")
+    if ambiguous:
+        st.warning(
+            "These names match more than one existing player — type the **full, "
+            "distinct** name (e.g. add 'Jr.') so the stats go to the right person: "
+            + "; ".join(ambiguous)
+        )
 
     # Flag within-team look-alikes so the admin can disambiguate (or confirm
     # they really are different people) before importing.
