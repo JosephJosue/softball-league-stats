@@ -8,6 +8,7 @@ Nothing is written until the admin clicks Import.
 from __future__ import annotations
 
 import datetime
+from dataclasses import replace
 
 import pandas as pd
 import streamlit as st
@@ -199,18 +200,59 @@ def _render_game_import(client, card: GameCard) -> None:
     season = st.text_input("Season", placeholder="e.g. 2026-Spring")
     create_missing = st.checkbox("Create players that don't exist yet", value=True)
 
-    st.markdown(f"**{card.away_team} — batting/pitching**")
-    st.dataframe(_side_df(card.away_players), use_container_width=True, hide_index=True)
-    st.markdown(f"**{card.home_team} — batting/pitching**")
-    st.dataframe(_side_df(card.home_players), use_container_width=True, hide_index=True)
+    st.info(
+        "Edit any **Player** name below before importing — useful for fixing "
+        "truncated or ambiguous names (e.g. 'Juan Diego' → 'Juan Diego Torres') "
+        "so stats go to the right player."
+    )
+    away_players = _editable_side(
+        client, card.away_team, card.away_players, team_id_by_name.get(away_choice), "gc_edit_away"
+    )
+    home_players = _editable_side(
+        client, card.home_team, card.home_players, team_id_by_name.get(home_choice), "gc_edit_home"
+    )
 
     if st.button("🚀 Import full game", use_container_width=True):
         _do_game_import(
             client, card,
+            away_players=away_players, home_players=home_players,
             away_choice=away_choice, home_choice=home_choice,
             season=season.strip() or None, gdate=gdate, create_missing=create_missing,
             team_id_by_name=team_id_by_name,
         )
+
+
+def _editable_side(
+    client, team_label: str, players: list[PlayerStat], team_id: str | None, key: str
+) -> list[PlayerStat]:
+    """Editable preview for one team; returns players with any name edits applied.
+
+    Shows whether each (possibly edited) name will merge into an existing roster
+    player or be created new, so the admin can resolve ambiguous names first.
+    """
+    st.markdown(f"**{team_label} — batting/pitching** (Player names are editable)")
+    df = _side_df(players)
+    edited = st.data_editor(
+        df,
+        hide_index=True,
+        use_container_width=True,
+        disabled=[c for c in df.columns if c != "Player"],
+        key=key,
+    )
+    names = list(edited["Player"])
+    result = [replace(p, name=str(nm).strip() or p.name) for p, nm in zip(players, names)]
+
+    # Live "where will this land" feedback against the chosen team's roster.
+    cache = _roster_cache(client, team_id) if team_id else []
+    merges = []
+    for q in result:
+        m = find_match(normalize_name(q.name), cache)
+        if m:
+            merges.append(f"{q.name} → {m['name']}")
+    if merges:
+        st.caption("Will update existing players: " + "; ".join(merges))
+    st.caption(f"{len(result) - len(merges)} new player(s), {len(merges)} matched.")
+    return result
 
 
 def _resolve_team(client, choice: str, parsed_name: str, season, team_id_by_name: dict) -> str:
@@ -302,8 +344,8 @@ def _import_side(
 
 
 def _do_game_import(
-    client, card: GameCard, *, away_choice, home_choice, season, gdate, create_missing,
-    team_id_by_name,
+    client, card: GameCard, *, away_players, home_players,
+    away_choice, home_choice, season, gdate, create_missing, team_id_by_name,
 ) -> None:
     away_id = _resolve_team(client, away_choice, card.away_team, season, team_id_by_name)
     home_id = _resolve_team(client, home_choice, card.home_team, season, team_id_by_name)
@@ -330,10 +372,10 @@ def _do_game_import(
     else:
         game_id = games_svc.create_game(payload, client=client)["id"]
 
-    # Player stat lines.
-    n_away = _import_side(client, card.away_players, game_id=game_id, team_id=away_id,
+    # Player stat lines (using any admin name edits).
+    n_away = _import_side(client, away_players, game_id=game_id, team_id=away_id,
                           pos_map=pos_map, create_missing=create_missing)
-    n_home = _import_side(client, card.home_players, game_id=game_id, team_id=home_id,
+    n_home = _import_side(client, home_players, game_id=game_id, team_id=home_id,
                           pos_map=pos_map, create_missing=create_missing)
 
     # Line score (away = top, home = bottom).
