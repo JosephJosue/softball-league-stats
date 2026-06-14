@@ -7,6 +7,7 @@ so these functions are thin wrappers that filter and sort for the UI.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 from supabase import Client
 
@@ -19,9 +20,9 @@ V_POSITION = "v_position_leaders"
 
 def _add_batting_rates(df: pd.DataFrame) -> pd.DataFrame:
     """(Re)compute AVG/OBP/SLG/OPS from counting columns (NaN when AB=0)."""
-    ab = df["ab"].replace(0, pd.NA)
+    ab = df["ab"].replace(0, np.nan)
     df["avg"] = (df["h"] / ab).round(3)
-    df["obp"] = ((df["h"] + df["bb"]) / (df["ab"] + df["bb"]).replace(0, pd.NA)).round(3)
+    df["obp"] = ((df["h"] + df["bb"]) / (df["ab"] + df["bb"]).replace(0, np.nan)).round(3)
     df["slg"] = (df["tb"] / ab).round(3)
     df["ops"] = (df["obp"].fillna(0) + df["slg"].fillna(0)).round(3)
     return df
@@ -65,7 +66,7 @@ def team_season_totals(
     df = to_df(query.execute())
     if season is None:
         def _team_avg(g: pd.DataFrame) -> pd.DataFrame:
-            g["team_avg"] = (g["hits"] / g["ab"].replace(0, pd.NA)).round(3)
+            g["team_avg"] = (g["hits"] / g["ab"].replace(0, np.nan)).round(3)
             return g
         df = _aggregate(df, ["team_id", "team_name"], _team_avg)
     return df.sort_values("runs", ascending=False).reset_index(drop=True) if not df.empty else df
@@ -85,7 +86,7 @@ def position_leaders(
     df = to_df(query.execute())
     if season is None and not df.empty:
         def _avg(g: pd.DataFrame) -> pd.DataFrame:
-            g["avg"] = (g["h"] / g["ab"].replace(0, pd.NA)).round(3)
+            g["avg"] = (g["h"] / g["ab"].replace(0, np.nan)).round(3)
             return g
         keys = [k for k in ["position_code", "position_name", "category", "player_id", "player_name"] if k in df.columns]
         df = _aggregate(df, keys, _avg)

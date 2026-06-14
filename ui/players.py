@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -82,15 +83,15 @@ def _skill_scores(client, player_id: str, scope: str = "League") -> dict[str, fl
         team_id = agg.loc[agg["player_id"] == player_id, "team_id"].iloc[0]
         agg = agg[agg["team_id"] == team_id]
 
-    ab = agg["ab"].replace(0, pd.NA)
-    abbb = (agg["ab"] + agg["bb"]).replace(0, pd.NA)
-    games = agg["games"].replace(0, pd.NA)
+    ab = agg["ab"].replace(0, np.nan)
+    abbb = (agg["ab"] + agg["bb"]).replace(0, np.nan)
+    games = agg["games"].replace(0, np.nan)
     agg["contact"] = agg["h"] / ab
     agg["power"] = agg["tb"] / ab
     agg["onbase"] = (agg["h"] + agg["bb"]) / abbb
     agg["discipline"] = agg["bb"] / abbb
     agg["production"] = agg["rbi"] / games
-    denom = agg["innings_played"].where(agg["innings_played"] > 0, agg["games"]).replace(0, pd.NA)
+    denom = agg["innings_played"].where(agg["innings_played"] > 0, agg["games"]).replace(0, np.nan)
     agg["defense"] = -(agg["errors"] / denom)  # fewer errors per inning ranks higher
 
     axes = {
