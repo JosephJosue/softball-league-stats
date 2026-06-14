@@ -118,6 +118,7 @@ create table if not exists player_game_stats (
 
     -- Defense
     errors int default 0,
+    innings_played numeric(3, 1),                    -- defensive innings on the field
 
     -- Pitching (nullable; only for pitchers)
     ip    numeric(4, 1),                             -- innings pitched, e.g. 5.2
@@ -246,7 +247,8 @@ select
             / nullif(sum(pgs.ab) + sum(pgs.bb), 0)
         + sum(pgs.tb)::numeric
             / nullif(sum(pgs.ab), 0)
-    , 3)                                        as ops
+    , 3)                                        as ops,
+    coalesce(sum(pgs.innings_played), 0)        as innings_played
 from player_game_stats pgs
 join players p on p.id = pgs.player_id
 join games   g on g.id = pgs.game_id

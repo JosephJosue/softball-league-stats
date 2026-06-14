@@ -260,10 +260,12 @@ def _player_line_entry(client, game: dict, team_names: dict) -> None:
             so = c[1].number_input("SO", 0, step=1)
             lob = c[2].number_input("LOB", 0, step=1)
             errors = c[3].number_input("E", 0, step=1)
-            c = st.columns(3)
+            c = st.columns(4)
             doubles = c[0].number_input("2B", 0, step=1)
             triples = c[1].number_input("3B", 0, step=1)
             hr = c[2].number_input("HR", 0, step=1)
+            def_inn = c[3].number_input("Def inn", 0.0, step=1.0, format="%.1f",
+                                        help="Defensive innings played")
 
             pitched = st.checkbox("This player pitched")
             ip = pr = ph = er = pbb = pso = phr = None
@@ -290,6 +292,7 @@ def _player_line_entry(client, game: dict, team_names: dict) -> None:
                         ab=int(ab), r=int(r), h=int(h), rbi=int(rbi),
                         bb=int(bb), so=int(so), doubles=int(doubles),
                         triples=int(triples), hr=int(hr), lob=int(lob), errors=int(errors),
+                        innings_played=float(def_inn) or None,
                         ip=float(ip) if pitched else None,
                         p_h=int(ph) if pitched else None,
                         p_r=int(pr) if pitched else None,

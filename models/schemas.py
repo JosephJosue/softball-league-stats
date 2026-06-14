@@ -125,6 +125,7 @@ class PlayerGameStatsCreate(_Payload):
 
     # Defense
     errors: int = Field(default=0, ge=0)
+    innings_played: float | None = Field(default=None, ge=0)
 
     # Pitching (optional; only for pitchers)
     ip: float | None = Field(default=None, ge=0)

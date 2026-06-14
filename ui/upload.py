@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from auth import session as auth
+from config.settings import GAME_INNINGS
 from ingestion import excel_parser, gamechanger, pdf_parser, validation
 from ingestion.gamechanger import GameCard, PlayerStat
 from ingestion.matching import find_match, normalize_name
@@ -169,6 +170,7 @@ def _side_df(players: list[PlayerStat]) -> pd.DataFrame:
                 "Player": p.name, "Pos": p.position or "",
                 "AB": p.ab, "R": p.r, "H": p.h, "RBI": p.rbi, "BB": p.bb, "SO": p.so,
                 "2B": p.doubles, "3B": p.triples, "HR": p.hr, "E": p.errors,
+                "DefInn": p.innings_played,
                 "IP": p.ip, "P_H": p.p_h, "P_R": p.p_r, "ER": p.er,
                 "P_BB": p.p_bb, "P_SO": p.p_so, "P_HR": p.p_hr,
             }
@@ -195,6 +197,9 @@ def _rows_to_players(originals: list[PlayerStat], edited: pd.DataFrame, valid_po
             pos = None
         bat = {attr: (int(row[col]) if pd.notna(row[col]) else 0) for col, attr in _BAT_COLS.items()}
 
+        di = row.get("DefInn")
+        innings_played = float(di) if pd.notna(di) else None
+
         ip_val = row.get("IP")
         ip = float(ip_val) if pd.notna(ip_val) else None
         if ip is not None:
@@ -202,13 +207,14 @@ def _rows_to_players(originals: list[PlayerStat], edited: pd.DataFrame, valid_po
         else:
             pit = {attr: None for attr in _PIT_COLS.values()}
 
-        out.append(replace(orig, name=name, position=pos, ip=ip, **bat, **pit))
+        out.append(replace(orig, name=name, position=pos, innings_played=innings_played, ip=ip, **bat, **pit))
     return out
 
 
 def _editor_config(pos_codes: list[str]) -> dict:
     num = st.column_config.NumberColumn(min_value=0, step=1)
     cfg = {col: num for col in [*_BAT_COLS, *_PIT_COLS]}
+    cfg["DefInn"] = st.column_config.NumberColumn("DefInn", min_value=0, step=1, help="Defensive innings played")
     cfg["IP"] = st.column_config.NumberColumn(min_value=0.0, step=0.1, format="%.1f")
     cfg["Pos"] = st.column_config.SelectboxColumn(options=["", *pos_codes])
     cfg["Player"] = st.column_config.TextColumn()
@@ -244,12 +250,18 @@ def _render_game_import(client, card: GameCard) -> None:
         "truncated or ambiguous names (e.g. 'Juan Diego' → 'Juan Diego Torres') "
         "so stats go to the right player."
     )
+    # Defensive innings ≈ how many innings the team spent on the field, which is
+    # the number of innings the OTHER team batted.
+    away_def = len(card.home_innings) or GAME_INNINGS
+    home_def = len(card.away_innings) or GAME_INNINGS
     away_players = _editable_side(
-        client, card.away_team, card.away_players, team_id_by_name.get(away_choice), "gc_edit_away"
+        client, card.away_team, card.away_players, team_id_by_name.get(away_choice), "gc_edit_away", away_def
     )
     home_players = _editable_side(
-        client, card.home_team, card.home_players, team_id_by_name.get(home_choice), "gc_edit_home"
+        client, card.home_team, card.home_players, team_id_by_name.get(home_choice), "gc_edit_home", home_def
     )
+
+    _reconciliation(card, away_players, home_players)
 
     if st.button("🚀 Import full game", use_container_width=True):
         _do_game_import(
@@ -262,16 +274,22 @@ def _render_game_import(client, card: GameCard) -> None:
 
 
 def _editable_side(
-    client, team_label: str, players: list[PlayerStat], team_id: str | None, key: str
+    client, team_label: str, players: list[PlayerStat], team_id: str | None,
+    key: str, def_innings_default: int,
 ) -> list[PlayerStat]:
-    """Editable preview for one team; returns players with any name edits applied.
+    """Editable preview for one team; returns players with all edits applied.
 
-    Shows whether each (possibly edited) name will merge into an existing roster
-    player or be created new, so the admin can resolve ambiguous names first.
+    Defensive innings default to how many innings the team fielded (admin can
+    lower them for substitutes). Shows whether each (possibly edited) name will
+    merge into an existing roster player or be created new.
     """
     st.markdown(f"**{team_label} — batting/pitching** (all fields editable)")
     pos_codes = pos_svc.list_positions(client)["code"].tolist()
-    df = _side_df(players)
+    prepared = [
+        replace(p, innings_played=p.innings_played if p.innings_played is not None else def_innings_default)
+        for p in players
+    ]
+    df = _side_df(prepared)
     edited = st.data_editor(
         df,
         hide_index=True,
@@ -292,6 +310,38 @@ def _editable_side(
         st.caption("Will update existing players: " + "; ".join(merges))
     st.caption(f"{len(result) - len(merges)} new player(s), {len(merges)} matched.")
     return result
+
+
+def _reconciliation(card: GameCard, away_players, home_players) -> None:
+    """Check the scoresheet math lines up with the final score before importing."""
+    rows = []
+    for label, score, innings, players, totals in [
+        (card.away_team, card.away_score, card.away_innings, away_players, card.away_totals),
+        (card.home_team, card.home_score, card.home_innings, home_players, card.home_totals),
+    ]:
+        line_sum = sum(innings)
+        runs_sum = sum(p.r for p in players)
+        hits_sum = sum(p.h for p in players)
+        rows.append(
+            {
+                "Team": label,
+                "Final": score,
+                "Line score Σ": f"{line_sum} {'✅' if line_sum == score else '⚠️'}",
+                "Player runs Σ": f"{runs_sum} {'✅' if runs_sum == score else '⚠️'}",
+                "Player hits Σ": f"{hits_sum} {'✅' if hits_sum == totals.get('h', hits_sum) else '⚠️'}",
+            }
+        )
+    df = pd.DataFrame(rows)
+    ok = all("⚠️" not in " ".join(map(str, r.values())) for r in rows)
+    st.markdown("**Reconciliation**")
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    if ok:
+        st.caption("✅ Scoresheet math matches the final score.")
+    else:
+        st.warning(
+            "⚠️ Some totals don't match the final score. Edit the stat lines above "
+            "to fix, or import anyway if the scorecard itself is inconsistent."
+        )
 
 
 def _resolve_team(client, choice: str, parsed_name: str, season, team_id_by_name: dict) -> str:
@@ -371,6 +421,8 @@ def _import_side(
             "ab": p.ab, "r": p.r, "h": p.h, "rbi": p.rbi, "bb": p.bb, "so": p.so,
             "doubles": p.doubles, "triples": p.triples, "hr": p.hr, "errors": p.errors,
         }
+        if p.innings_played is not None:
+            payload["innings_played"] = p.innings_played
         if p.ip is not None:
             payload.update(
                 ip=p.ip, p_h=p.p_h, p_r=p.p_r, er=p.er,

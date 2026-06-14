@@ -45,6 +45,7 @@ class PlayerStat:
     triples: int = 0
     hr: int = 0
     errors: int = 0
+    innings_played: float | None = None
     ip: float | None = None
     p_h: int | None = None
     p_r: int | None = None

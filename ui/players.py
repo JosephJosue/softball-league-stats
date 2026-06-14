@@ -73,7 +73,13 @@ def _skill_scores(client, player_id: str) -> dict[str, float] | None:
     games = d["games"].replace(0, pd.NA)
     d["bb_rate"] = d["bb"] / (d["ab"] + d["bb"]).replace(0, pd.NA)
     d["rbi_pg"] = d["rbi"] / games
-    d["def_inv"] = -(d["errors"] / games)  # fewer errors ranks higher
+    # Defense: errors per defensive inning (better normalization than per game);
+    # fall back to per-game when innings aren't recorded.
+    if "innings_played" in d.columns:
+        denom = d["innings_played"].where(d["innings_played"] > 0, d["games"]).replace(0, pd.NA)
+    else:
+        denom = games
+    d["def_inv"] = -(d["errors"] / denom)  # fewer errors ranks higher
 
     axes = {
         "Contact": "avg",
@@ -144,13 +150,25 @@ def _defense_view(client, player: dict, lines: pd.DataFrame) -> None:
     id2code = pos_svc.id_to_code(client)
     d = lines.copy()
     d["Position"] = d["position_id"].map(id2code).fillna("—")
+    if "innings_played" not in d.columns:
+        d["innings_played"] = 0
+    d["innings_played"] = d["innings_played"].fillna(0)
+
+    total_inn = float(d["innings_played"].sum())
+    total_err = int(d["errors"].sum())
+    e_per_inn = round(total_err / total_inn, 3) if total_inn else 0.0
+    components.metric_row(
+        [("Appearances", int(len(d))), ("Def innings", total_inn),
+         ("Errors", total_err), ("E / inning", e_per_inn)],
+        per_row=2,
+    )
+
     summary = (
         d.groupby("Position")
-        .agg(Games=("id", "count"), Errors=("errors", "sum"))
+        .agg(Games=("id", "count"), Innings=("innings_played", "sum"), Errors=("errors", "sum"))
         .reset_index()
-        .sort_values("Games", ascending=False)
+        .sort_values("Innings", ascending=False)
     )
-    components.metric_row([("Appearances", int(len(d))), ("Total errors", int(d["errors"].sum()))], per_row=2)
     st.markdown("**By position**")
     st.dataframe(summary, use_container_width=True, hide_index=True)
 

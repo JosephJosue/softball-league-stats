@@ -99,6 +99,8 @@ the Supabase SQL Editor (new installs already include them via `schema.sql`):
   `ON DELETE CASCADE` (every player has one team; deleting a team deletes them).
 - `004_team_delete_cascade.sql` — cascades a team's games, innings, and game
   stats on delete, so a team that has played can be removed cleanly.
+- `005_innings_played.sql` — adds `player_game_stats.innings_played` and exposes
+  it in `v_player_season_totals` for errors-per-inning fielding metrics.
 
 ---
 
