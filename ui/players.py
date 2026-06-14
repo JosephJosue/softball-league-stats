@@ -113,16 +113,27 @@ def _player_detail(client, player_id: str, player_name: str) -> None:
         _defense_view(client, player, lines)
 
 
+def _rate(value) -> str:
+    """Format a rate stat as .333, or '.000' when undefined (e.g. 0 AB)."""
+    return f"{value:.3f}" if pd.notna(value) else ".000"
+
+
+def _int(value) -> int:
+    return int(value) if pd.notna(value) else 0
+
+
 def _offense_view(client, player_id: str, player_name: str, lines: pd.DataFrame) -> None:
     totals = analytics.player_season_totals(client)
     mine = totals[totals["player_id"] == player_id] if not totals.empty else totals
     if not mine.empty:
         agg = mine.iloc[0]
         components.metric_row(
-            [("AVG", f"{agg['avg']:.3f}"), ("OBP", f"{agg['obp']:.3f}"), ("OPS", f"{agg['ops']:.3f}"),
-             ("HR", int(agg["hr"])), ("RBI", int(agg["rbi"])), ("H", int(agg["h"]))],
+            [("AVG", _rate(agg["avg"])), ("OBP", _rate(agg["obp"])), ("OPS", _rate(agg["ops"])),
+             ("HR", _int(agg["hr"])), ("RBI", _int(agg["rbi"])), ("H", _int(agg["h"]))],
             per_row=3,
         )
+        if _int(agg["ab"]) == 0:
+            st.caption("No at-bats recorded — rate stats shown as .000.")
     else:
         st.caption("No batting stats recorded yet for this player.")
 
