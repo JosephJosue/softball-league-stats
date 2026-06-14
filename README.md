@@ -128,5 +128,9 @@ This project is built and reviewed in phases:
 2. **Core Backend** — models, auth/session, CRUD + analytics services.
 3. **Streamlit UI** — navigation, pages, mobile-first tables & charts.
 4. **Data Ingestion** — PDF + Excel parsers, validation/reconciliation.
-5. **Predictions** — rolling averages + lineup heuristics.
-6. **Export + Polish** — Excel export, UX refinement.
+5. **Predictions** ✅ — rolling form, Monte-Carlo optimized batting order, defensive lineup.
+6. **Export + Polish** ✅ — styled Excel export (Dashboard/Players/Games), UX refinement.
+
+All six phases are complete. Download buttons export styled `.xlsx` workbooks
+(id columns stripped, frozen headers) from the Dashboard (league-wide), Players
+(team roster + totals), and Games pages.

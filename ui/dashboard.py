@@ -11,6 +11,7 @@ from services import games as games_svc
 from services import players as players_svc
 from services import positions as pos_svc
 from services import teams as teams_svc
+from export import excel_export
 from ui import components
 from utils import filters
 
@@ -93,3 +94,23 @@ def render() -> None:
             card_title_col="player_name",
             key="dash_pos_leaders",
         )
+
+    # --- Export ---
+    st.divider()
+    st.markdown("### ⬇️ Export")
+    player_totals = analytics.player_season_totals(client, season=season)
+    workbook = excel_export.build_workbook(
+        {
+            "Players": player_totals,
+            "Teams": team_totals,
+            "Positions": analytics.position_leaders(client, season=season),
+        }
+    )
+    label = f"softball_stats{('_' + season) if season else ''}.xlsx"
+    st.download_button(
+        "Download stats (Excel)",
+        data=workbook,
+        file_name=label,
+        mime=excel_export.XLSX_MIME,
+        use_container_width=True,
+    )

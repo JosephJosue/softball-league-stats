@@ -14,6 +14,7 @@ from services import players as players_svc
 from services import positions as pos_svc
 from services import stats as stats_svc
 from services import teams as teams_svc
+from export import excel_export
 from ui import components
 from utils import calculations, filters
 
@@ -48,6 +49,21 @@ def render() -> None:
             ),
             use_container_width=True,
             hide_index=True,
+        )
+
+        # --- Export ---
+        roster_export = roster.copy()
+        if "positions" in roster_export.columns:
+            roster_export["positions"] = roster_export["positions"].apply(lambda v: ", ".join(_as_list(v)))
+        st.download_button(
+            "⬇️ Download players (Excel)",
+            data=excel_export.build_workbook({
+                "Player Totals": analytics.player_season_totals(client, team_id=team_id),
+                "Roster": roster_export,
+            }),
+            file_name="players.xlsx",
+            mime=excel_export.XLSX_MIME,
+            use_container_width=True,
         )
 
         # --- Player detail ---

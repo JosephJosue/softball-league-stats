@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from auth import session as auth
 from config.settings import GAME_INNINGS
+from export import excel_export
 from models.schemas import GameCreate, PlayerGameStatsCreate
 from services import games as games_svc
 from services import players as players_svc
@@ -45,12 +46,16 @@ def render() -> None:
     disp["Away"] = disp["away_team_id"].map(team_names).fillna("—")
     disp["Home"] = disp["home_team_id"].map(team_names).fillna("—")
     disp["Score"] = disp["away_score"].astype(str) + " – " + disp["home_score"].astype(str)
-    st.dataframe(
-        disp[["game_date", "Away", "Home", "Score", "status"]].rename(
-            columns={"game_date": "Date", "status": "Status"}
-        ),
+    games_view = disp[["game_date", "Away", "Home", "Score", "status"]].rename(
+        columns={"game_date": "Date", "status": "Status"}
+    )
+    st.dataframe(games_view, use_container_width=True, hide_index=True)
+    st.download_button(
+        "⬇️ Download games (Excel)",
+        data=excel_export.build_workbook({"Games": games_view}),
+        file_name="games.xlsx",
+        mime=excel_export.XLSX_MIME,
         use_container_width=True,
-        hide_index=True,
     )
 
     # Box score drill-down.

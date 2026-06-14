@@ -87,6 +87,10 @@ def main() -> None:
 
         st.error(humanize_db_error(exc))
 
+    st.divider()
+    role = "Admin" if auth.is_admin() else "Viewer (read-only)"
+    st.caption(f"{APP_ICON} {APP_TITLE} · {role} · data via Supabase")
+
 
 if __name__ == "__main__":
     main()
