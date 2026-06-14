@@ -31,3 +31,13 @@ def test_long_sheet_name_truncated():
     data = excel_export.build_workbook({name: df})
     wb = load_workbook(io.BytesIO(data))
     assert wb.sheetnames[0] == name[:31]
+
+
+def test_columns_with_nulls_export_cleanly():
+    # NaN/None must not break column-width measurement (regression).
+    df = pd.DataFrame([
+        {"name": "A", "jersey_number": 3.0, "bats": "R"},
+        {"name": "B", "jersey_number": float("nan"), "bats": None},
+    ])
+    data = excel_export.build_workbook({"Roster": df})
+    assert data[:2] == b"PK"

@@ -36,8 +36,11 @@ def _style_sheet(worksheet, df: pd.DataFrame) -> None:
         cell.fill = _HEADER_FILL
         cell.font = _HEADER_FONT
         cell.alignment = _CENTER
-        sample = df[col].astype(str).head(200)
-        width = max([len(str(col)), *(len(v) for v in sample)]) if len(sample) else len(str(col))
+        # fillna first: pandas' astype(str) leaves NaN/None as float NaN, which
+        # would break the len() width measurement below.
+        sample = df[col].head(200).fillna("").astype(str)
+        longest = int(sample.map(len).max()) if len(sample) else 0
+        width = max(len(str(col)), longest)
         worksheet.column_dimensions[get_column_letter(col_idx)].width = min(width + 2, 42)
     worksheet.freeze_panes = "A2"
 
