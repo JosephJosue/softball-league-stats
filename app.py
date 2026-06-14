@@ -82,8 +82,10 @@ def main() -> None:
     st.title(f"{APP_ICON} {APP_TITLE}")
     try:
         PAGES[choice]()
-    except Exception as exc:  # noqa: BLE001 - show errors in-app instead of crashing
-        st.error(f"Something went wrong rendering this page: {exc}")
+    except Exception as exc:  # noqa: BLE001 - show a friendly message, not a stack trace
+        from utils.errors import humanize_db_error
+
+        st.error(humanize_db_error(exc))
 
 
 if __name__ == "__main__":

@@ -25,6 +25,7 @@ from services import positions as pos_svc
 from services import stats as stats_svc
 from services import teams as teams_svc
 from ui import components
+from utils.errors import humanize_db_error
 
 EXPECTED = (
     "Expected columns (headers are auto-matched, any order/spelling): "
@@ -110,15 +111,18 @@ def render() -> None:
         st.warning(f"Reconciliation: {w}")
 
     if st.button("🚀 Import stats", use_container_width=True):
-        _do_import(
-            client,
-            rows,
-            game_id=game_labels[game_pick],
-            default_team_id=team_opts[default_team],
-            team_opts=team_opts,
-            create_missing=create_missing,
-            new_attrs=new_attrs,
-        )
+        try:
+            _do_import(
+                client,
+                rows,
+                game_id=game_labels[game_pick],
+                default_team_id=team_opts[default_team],
+                team_opts=team_opts,
+                create_missing=create_missing,
+                new_attrs=new_attrs,
+            )
+        except Exception as exc:  # noqa: BLE001 - friendly message instead of a crash
+            st.error(humanize_db_error(exc))
 
 
 def _new_player_editor(client, rows: list[dict]) -> dict[str, dict]:
@@ -264,13 +268,16 @@ def _render_game_import(client, card: GameCard) -> None:
     _reconciliation(card, away_players, home_players)
 
     if st.button("🚀 Import full game", use_container_width=True):
-        _do_game_import(
-            client, card,
-            away_players=away_players, home_players=home_players,
-            away_choice=away_choice, home_choice=home_choice,
-            season=season.strip() or None, gdate=gdate, create_missing=create_missing,
-            team_id_by_name=team_id_by_name,
-        )
+        try:
+            _do_game_import(
+                client, card,
+                away_players=away_players, home_players=home_players,
+                away_choice=away_choice, home_choice=home_choice,
+                season=season.strip() or None, gdate=gdate, create_missing=create_missing,
+                team_id_by_name=team_id_by_name,
+            )
+        except Exception as exc:  # noqa: BLE001 - friendly message instead of a crash
+            st.error(humanize_db_error(exc))
 
 
 def _editable_side(
@@ -309,6 +316,21 @@ def _editable_side(
     if merges:
         st.caption("Will update existing players: " + "; ".join(merges))
     st.caption(f"{len(result) - len(merges)} new player(s), {len(merges)} matched.")
+
+    # Flag within-team look-alikes so the admin can disambiguate (or confirm
+    # they really are different people) before importing.
+    keys = [(q.name, normalize_name(q.name)) for q in result]
+    look_alikes = []
+    for i, (na, ka) in enumerate(keys):
+        for nb, kb in keys[i + 1:]:
+            if ka and kb and ka != kb and (ka.startswith(kb) or kb.startswith(ka)):
+                look_alikes.append(f"'{na}' / '{nb}'")
+    if look_alikes:
+        st.warning(
+            "Similar names on this team — if any pair is the **same** player, give "
+            "them the same full name; if they're **different** people, leave them. "
+            + "; ".join(look_alikes)
+        )
     return result
 
 
