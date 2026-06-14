@@ -61,8 +61,8 @@ create table if not exists games (
     id            uuid primary key default gen_random_uuid(),
     game_date     date not null,
     season        text,
-    home_team_id  uuid references teams(id),
-    away_team_id  uuid references teams(id),
+    home_team_id  uuid references teams(id) on delete cascade,
+    away_team_id  uuid references teams(id) on delete cascade,
     home_score    int default 0,
     away_score    int default 0,
     location      text,
@@ -80,7 +80,7 @@ create table if not exists innings (
     id             uuid primary key default gen_random_uuid(),
     game_id        uuid references games(id) on delete cascade,
     inning_number  int not null,
-    team_id        uuid references teams(id),
+    team_id        uuid references teams(id) on delete cascade,
     half           text check (half in ('top', 'bottom')),
     runs           int default 0,
     hits           int default 0,
@@ -98,7 +98,7 @@ create table if not exists player_game_stats (
     id           uuid primary key default gen_random_uuid(),
     game_id      uuid references games(id) on delete cascade,
     player_id    uuid references players(id) on delete cascade,
-    team_id      uuid references teams(id),
+    team_id      uuid references teams(id) on delete cascade,
     position_id  uuid references positions(id),     -- position played this game
 
     -- Batting (raw counting stats)
@@ -141,7 +141,7 @@ create table if not exists player_game_stats (
 create table if not exists team_game_stats (
     id        uuid primary key default gen_random_uuid(),
     game_id   uuid references games(id) on delete cascade,
-    team_id   uuid references teams(id),
+    team_id   uuid references teams(id) on delete cascade,
     runs    int default 0,
     hits    int default 0,
     errors  int default 0,

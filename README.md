@@ -97,6 +97,8 @@ the Supabase SQL Editor (new installs already include them via `schema.sql`):
   `(game_date, home_team_id, away_team_id)` so a matchup can't be imported twice.
 - `003_player_team_required.sql` — makes `players.team_id` NOT NULL and the FK
   `ON DELETE CASCADE` (every player has one team; deleting a team deletes them).
+- `004_team_delete_cascade.sql` — cascades a team's games, innings, and game
+  stats on delete, so a team that has played can be removed cleanly.
 
 ---
 
