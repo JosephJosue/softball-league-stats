@@ -173,3 +173,23 @@ class TeamGameStatsCreate(_Payload):
 class TeamGameStats(TeamGameStatsCreate):
     id: str
     created_at: datetime | None = None
+
+
+# --- Player defensive stats (manually compiled per player) ----------------
+
+class PlayerDefenseCreate(_Payload):
+    player_id: str
+    season: str = "all"
+    games: int = Field(default=0, ge=0)
+    po: int = Field(default=0, ge=0)
+    a: int = Field(default=0, ge=0)
+    e: int = Field(default=0, ge=0)
+    dp: int = Field(default=0, ge=0)
+    opo: int = Field(default=0, ge=0)
+    good_throws: int = Field(default=0, ge=0)
+    total_throws: int = Field(default=0, ge=0)
+
+
+class PlayerDefense(PlayerDefenseCreate):
+    id: str
+    created_at: datetime | None = None

@@ -219,9 +219,10 @@ FIELD_POSITIONS = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "SF"]
 def defensive_lineup(players: list[dict], positions: list[str] = FIELD_POSITIONS) -> dict[str, dict | None]:
     """Greedy best-fielder-per-position assignment.
 
-    players: [{name, eligible: set[str], fielding: float (lower=better), apps}]
-    Fills the scarcest positions first (fewest eligible players), picking the
-    best fielder still available. Returns {position: player_or_None}.
+    players: [{name, eligible: set[str], rating: float (higher=better), apps}]
+    where `rating` is fielding % (PO+A)/(PO+A+E). Fills the scarcest positions
+    first (fewest eligible players), picking the best fielder still available.
+    Returns {position: player_or_None}.
     """
     assigned: dict[str, dict | None] = {}
     used: set[str] = set()
@@ -234,7 +235,7 @@ def defensive_lineup(players: list[dict], positions: list[str] = FIELD_POSITIONS
         if not cands:
             assigned[pos] = None
             continue
-        best = min(cands, key=lambda p: (p["fielding"], -p["apps"]))
+        best = max(cands, key=lambda p: (p["rating"], p["apps"]))
         assigned[pos] = best
         used.add(best["name"])
     return assigned

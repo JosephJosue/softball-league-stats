@@ -10,6 +10,7 @@ from auth import session as auth
 from config.settings import GAME_INNINGS, ROLLING_WINDOW_GAMES
 from predictions import engine
 from services import analytics
+from services import defense as defense_svc
 from services import games as games_svc
 from services import players as players_svc
 from services import stats as stats_svc
@@ -91,7 +92,10 @@ def _defensive_section(client, team_id: str, totals: pd.DataFrame) -> None:
     if roster.empty:
         st.info("No players on this team.")
         return
-    tmap = totals.set_index("player_id") if "player_id" in totals.columns else pd.DataFrame()
+
+    dfp = defense_svc.by_player(client)
+    fmap = dict(zip(dfp["player_id"], dfp["fpct"])) if not dfp.empty else {}
+    gmap = dict(zip(dfp["player_id"], dfp["games"])) if not dfp.empty else {}
 
     players = []
     no_positions = []
@@ -99,25 +103,26 @@ def _defensive_section(client, team_id: str, totals: pd.DataFrame) -> None:
         eligible = set(_as_list(r.get("positions")))
         if not eligible:
             no_positions.append(r["name"])
-        errors = innings = games = 0
-        if not tmap.empty and r["id"] in tmap.index:
-            t = tmap.loc[r["id"]]
-            errors = int(t.get("errors", 0) or 0)
-            innings = float(t.get("innings_played", 0) or 0)
-            games = int(t.get("games", 0) or 0)
-        denom = innings if innings > 0 else (games if games > 0 else 1)
+        fpct = fmap.get(r["id"])
+        rating = float(fpct) if fpct is not None and pd.notna(fpct) else 0.0
         players.append(
             {"name": r["name"], "eligible": eligible,
-             "fielding": round(errors / denom, 3), "apps": games}
+             "rating": rating, "apps": int(gmap.get(r["id"], 0) or 0)}
         )
 
     lineup = engine.defensive_lineup(players)
     rows = [
         {"Position": pos, "Player": (p["name"] if p else "—"),
-         "E/inn": (p["fielding"] if p else None), "Apps": (p["apps"] if p else None)}
+         "Fielding %": (round(p["rating"], 3) if p and p["rating"] else None),
+         "Games": (p["apps"] if p else None)}
         for pos, p in lineup.items()
     ]
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(
+        pd.DataFrame(rows), use_container_width=True, hide_index=True,
+        column_config={"Fielding %": st.column_config.NumberColumn("Fielding %", format="%.3f")},
+    )
+    if not fmap:
+        st.caption("Tip: import the defensive-stats sheet (Upload Data) to rank fielders by fielding %.")
     if no_positions:
         st.caption(
             "No eligible positions set for: " + ", ".join(no_positions)

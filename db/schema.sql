@@ -156,8 +156,29 @@ create table if not exists team_game_stats (
 
 
 -- ---------------------------------------------------------------------
+-- player_defensive_stats  (manually compiled from replays; aggregate per player)
+-- ---------------------------------------------------------------------
+create table if not exists player_defensive_stats (
+    id            uuid primary key default gen_random_uuid(),
+    player_id     uuid references players(id) on delete cascade,
+    season        text not null default 'all',
+    games         int default 0,
+    po            int default 0,                       -- putouts
+    a             int default 0,                       -- assists
+    e             int default 0,                       -- errors
+    dp            int default 0,                       -- double plays
+    opo           int default 0,                       -- chances/opportunities
+    good_throws   int default 0,
+    total_throws  int default 0,
+    created_at    timestamptz default now(),
+    unique (player_id, season)
+);
+
+
+-- ---------------------------------------------------------------------
 -- Indexes (foreign keys + common filter columns)
 -- ---------------------------------------------------------------------
+create index if not exists idx_pds_player      on player_defensive_stats(player_id);
 create index if not exists idx_players_team   on players(team_id);
 create index if not exists idx_games_date      on games(game_date);
 create index if not exists idx_games_season     on games(season);
@@ -185,7 +206,7 @@ declare
     t text;
     tables text[] := array[
         'positions', 'teams', 'players', 'games',
-        'innings', 'player_game_stats', 'team_game_stats'
+        'innings', 'player_game_stats', 'team_game_stats', 'player_defensive_stats'
     ];
 begin
     foreach t in array tables loop

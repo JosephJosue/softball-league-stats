@@ -15,10 +15,12 @@ import streamlit as st
 
 from auth import session as auth
 from config.settings import GAME_INNINGS
+from ingestion import defense as defense_parser
 from ingestion import excel_parser, gamechanger, pdf_parser, validation
 from ingestion.gamechanger import GameCard, PlayerStat
 from ingestion.matching import find_match, normalize_name
-from models.schemas import GameCreate, PlayerCreate, TeamCreate
+from models.schemas import GameCreate, PlayerCreate, PlayerDefenseCreate, TeamCreate
+from services import defense as defense_svc
 from services import games as games_svc
 from services import players as players_svc
 from services import positions as pos_svc
@@ -60,6 +62,11 @@ def render() -> None:
     raw = _parse(uploaded.name, data)
     if raw is None or raw.empty:
         st.error("Couldn't extract a table from this file.")
+        return
+
+    # Defensive-stats spreadsheets (PO/A/E/DP...) get their own import flow.
+    if defense_parser.looks_like_defense(raw):
+        _render_defense_import(client, raw)
         return
 
     st.markdown("**1. Raw data**")
@@ -541,6 +548,81 @@ def _do_game_import(
         f"{card.home_team}** ({gdate}): {n_away} away + {n_home} home stat lines, "
         "line score, and team totals saved."
     )
+    st.balloons()
+
+
+def _safe_int(value) -> int:
+    return int(value) if pd.notna(value) else 0
+
+
+def _render_defense_import(client, raw: pd.DataFrame) -> None:
+    st.success("Defensive-stats sheet detected (PO / A / E / DP).")
+    rows, errors = defense_parser.parse(raw)
+    for e in errors:
+        st.error(e)
+    if not rows:
+        return
+
+    teams_df = teams_svc.list_teams(client)
+    if teams_df.empty:
+        st.info("Create a team first (Teams page).")
+        return
+    team_opts = dict(zip(teams_df["name"], teams_df["id"]))
+    team_name = st.selectbox("Team these stats belong to", list(team_opts.keys()))
+    team_id = team_opts[team_name]
+    season = st.text_input("Season", value="all") or "all"
+    create_missing = st.checkbox("Create players that don't exist yet", value=True)
+
+    st.markdown("**Defensive stats — Player names are editable**")
+    df = pd.DataFrame(rows)
+    edited = st.data_editor(
+        df, hide_index=True, use_container_width=True, key="def_editor",
+        column_config={
+            "player_name": st.column_config.TextColumn("Player"),
+            **{c: st.column_config.NumberColumn(c.upper(), min_value=0, step=1)
+               for c in df.columns if c != "player_name"},
+        },
+    )
+
+    # Show how names resolve against the chosen team's roster.
+    cache = _roster_cache(client, team_id)
+    merges = [f"{n} → {m['name']}" for n in edited["player_name"]
+              if (m := find_match(normalize_name(str(n)), cache))]
+    if merges:
+        st.caption("Will update existing players: " + "; ".join(merges))
+
+    if st.button("🚀 Import defensive stats", use_container_width=True):
+        try:
+            _do_defense_import(client, edited, team_id, season, create_missing)
+        except Exception as exc:  # noqa: BLE001
+            st.error(humanize_db_error(exc))
+
+
+def _do_defense_import(client, edited: pd.DataFrame, team_id: str, season: str, create_missing: bool) -> None:
+    cache = _roster_cache(client, team_id)
+    used: set = set()
+    count = 0
+    for _, row in edited.iterrows():
+        name = str(row.get("player_name") or "").strip()
+        if not name:
+            continue
+        pid = _resolve_or_create(
+            client, name, cache, create_missing,
+            lambda team_id=team_id: dict(team_id=team_id), used,
+        )
+        if not pid or pid in used:
+            continue
+        used.add(pid)
+        payload = PlayerDefenseCreate(
+            player_id=pid, season=season,
+            games=_safe_int(row.get("games")), po=_safe_int(row.get("po")),
+            a=_safe_int(row.get("a")), e=_safe_int(row.get("e")), dp=_safe_int(row.get("dp")),
+            opo=_safe_int(row.get("opo")), good_throws=_safe_int(row.get("good_throws")),
+            total_throws=_safe_int(row.get("total_throws")),
+        ).for_insert()
+        defense_svc.upsert_defense(payload, client=client)
+        count += 1
+    st.success(f"✅ Imported defensive stats for {count} player(s).")
     st.balloons()
 
 

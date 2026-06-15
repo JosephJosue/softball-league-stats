@@ -44,12 +44,12 @@ def test_best_hitters_sorted_and_filtered():
 
 def test_defensive_lineup_assigns_by_eligibility():
     players = [
-        {"name": "A", "eligible": {"SS", "2B"}, "fielding": 0.0, "apps": 5},
-        {"name": "B", "eligible": {"SS"}, "fielding": 0.1, "apps": 5},
-        {"name": "C", "eligible": {"P"}, "fielding": 0.2, "apps": 5},
+        {"name": "A", "eligible": {"SS", "2B"}, "rating": 0.95, "apps": 5},
+        {"name": "B", "eligible": {"SS"}, "rating": 0.90, "apps": 5},
+        {"name": "C", "eligible": {"P"}, "rating": 0.80, "apps": 5},
     ]
     lineup = engine.defensive_lineup(players, positions=["P", "SS", "2B"])
-    # B only plays SS, so B->SS; A then covers 2B; C->P
+    # B only plays SS, so scarcity puts B->SS; A then covers 2B; C->P
     assert lineup["SS"]["name"] == "B"
     assert lineup["2B"]["name"] == "A"
     assert lineup["P"]["name"] == "C"

@@ -9,6 +9,7 @@ import streamlit as st
 from auth import session as auth
 from models.schemas import PlayerCreate
 from services import analytics
+from services import defense as defense_svc
 from services import games as games_svc
 from services import players as players_svc
 from services import positions as pos_svc
@@ -94,6 +95,13 @@ def _skill_scores(client, player_id: str, scope: str = "League") -> dict[str, fl
         df["team_id"] = None
     agg = df.groupby("player_id", as_index=False).agg({**{c: "sum" for c in cols}, "team_id": "first"})
 
+    # Defense from the detailed fielding stats (fielding %), if available.
+    dfp = defense_svc.by_player(client)
+    if not dfp.empty:
+        agg = agg.merge(dfp[["player_id", "fpct"]], on="player_id", how="left")
+    else:
+        agg["fpct"] = np.nan
+
     # Restrict the comparison pool to teammates when scope == "Team".
     if scope == "Team":
         team_id = agg.loc[agg["player_id"] == player_id, "team_id"].iloc[0]
@@ -107,8 +115,7 @@ def _skill_scores(client, player_id: str, scope: str = "League") -> dict[str, fl
     agg["onbase"] = (agg["h"] + agg["bb"]) / abbb
     agg["discipline"] = agg["bb"] / abbb
     agg["production"] = agg["rbi"] / games
-    denom = agg["innings_played"].where(agg["innings_played"] > 0, agg["games"]).replace(0, np.nan)
-    agg["defense"] = -(agg["errors"] / denom)  # fewer errors per inning ranks higher
+    agg["defense"] = agg["fpct"]  # higher fielding % ranks higher
 
     axes = {
         "Contact": "contact", "Power": "power", "On-Base": "onbase",
@@ -189,34 +196,30 @@ def _defense_view(client, player: dict, lines: pd.DataFrame) -> None:
     eligible = _as_list(player.get("positions"))
     st.write("**Eligible positions:** " + (", ".join(eligible) if eligible else "—"))
 
-    if lines.empty or "position_id" not in lines.columns:
-        st.caption("No defensive appearances recorded yet.")
-        return
+    # Detailed fielding stats (manually compiled): PO/A/E/DP, fielding %, throws.
+    dfp = defense_svc.by_player(client)
+    mine = dfp[dfp["player_id"] == player.get("id")] if not dfp.empty else dfp
+    if not mine.empty:
+        d = mine.iloc[0]
+        components.metric_row(
+            [("Games", _int(d["games"])), ("PO", _int(d["po"])), ("A", _int(d["a"])),
+             ("E", _int(d["e"])), ("DP", _int(d["dp"])), ("Chances", _int(d["opo"]))],
+            per_row=3,
+        )
+        components.metric_row(
+            [("Fielding %", _rate(d["fpct"])), ("Throw %", _rate(d["throw_pct"]))], per_row=2
+        )
+    else:
+        st.caption("No detailed defensive stats yet — import the defensive sheet on Upload Data.")
 
-    id2code = pos_svc.id_to_code(client)
-    d = lines.copy()
-    d["Position"] = d["position_id"].map(id2code).fillna("—")
-    if "innings_played" not in d.columns:
-        d["innings_played"] = 0
-    d["innings_played"] = d["innings_played"].fillna(0)
-
-    total_inn = float(d["innings_played"].sum())
-    total_err = int(d["errors"].sum())
-    e_per_inn = round(total_err / total_inn, 3) if total_inn else 0.0
-    components.metric_row(
-        [("Appearances", int(len(d))), ("Def innings", total_inn),
-         ("Errors", total_err), ("E / inning", e_per_inn)],
-        per_row=2,
-    )
-
-    summary = (
-        d.groupby("Position")
-        .agg(Games=("id", "count"), Innings=("innings_played", "sum"), Errors=("errors", "sum"))
-        .reset_index()
-        .sort_values("Innings", ascending=False)
-    )
-    st.markdown("**By position**")
-    st.dataframe(summary, use_container_width=True, hide_index=True)
+    # Where the player has appeared (from game scorecards).
+    if not lines.empty and "position_id" in lines.columns:
+        id2code = pos_svc.id_to_code(client)
+        g = lines.copy()
+        g["Position"] = g["position_id"].map(id2code).fillna("—")
+        summary = g.groupby("Position").agg(Games=("id", "count")).reset_index()
+        st.markdown("**Appearances by position**")
+        st.dataframe(summary, use_container_width=True, hide_index=True)
 
     # Pitching (also a defensive role) — only when the player has pitched.
     _pitching_view(d)

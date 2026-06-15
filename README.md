@@ -101,6 +101,9 @@ the Supabase SQL Editor (new installs already include them via `schema.sql`):
   stats on delete, so a team that has played can be removed cleanly.
 - `005_innings_played.sql` — adds `player_game_stats.innings_played` and exposes
   it in `v_player_season_totals` for errors-per-inning fielding metrics.
+- `006_player_defensive_stats.sql` — adds the `player_defensive_stats` table
+  (PO/A/E/DP, chances, throws) for real Fielding %, used by the Defense tab,
+  skill radar, and the predicted defensive lineup.
 
 ---
 
