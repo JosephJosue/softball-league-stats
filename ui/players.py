@@ -222,7 +222,7 @@ def _defense_view(client, player: dict, lines: pd.DataFrame) -> None:
         st.dataframe(summary, use_container_width=True, hide_index=True)
 
     # Pitching (also a defensive role) — only when the player has pitched.
-    _pitching_view(d)
+    _pitching_view(lines)
 
 
 def _pitching_view(lines: pd.DataFrame) -> None:
