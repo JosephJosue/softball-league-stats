@@ -43,9 +43,10 @@ create table if not exists teams (
 create table if not exists players (
     id                   uuid primary key default gen_random_uuid(),
     name                 text not null,
-    team_id              uuid references teams(id) on delete set null,
+    team_id              uuid not null references teams(id) on delete cascade,
     jersey_number        int,
     primary_position_id  uuid references positions(id),
+    positions            text[],                        -- eligible position codes, e.g. {SS,2B}
     bats                 text check (bats in ('L', 'R', 'S')),
     throws               text check (throws in ('L', 'R')),
     active               boolean default true,
@@ -60,8 +61,8 @@ create table if not exists games (
     id            uuid primary key default gen_random_uuid(),
     game_date     date not null,
     season        text,
-    home_team_id  uuid references teams(id),
-    away_team_id  uuid references teams(id),
+    home_team_id  uuid references teams(id) on delete cascade,
+    away_team_id  uuid references teams(id) on delete cascade,
     home_score    int default 0,
     away_score    int default 0,
     location      text,
@@ -79,7 +80,7 @@ create table if not exists innings (
     id             uuid primary key default gen_random_uuid(),
     game_id        uuid references games(id) on delete cascade,
     inning_number  int not null,
-    team_id        uuid references teams(id),
+    team_id        uuid references teams(id) on delete cascade,
     half           text check (half in ('top', 'bottom')),
     runs           int default 0,
     hits           int default 0,
@@ -97,7 +98,7 @@ create table if not exists player_game_stats (
     id           uuid primary key default gen_random_uuid(),
     game_id      uuid references games(id) on delete cascade,
     player_id    uuid references players(id) on delete cascade,
-    team_id      uuid references teams(id),
+    team_id      uuid references teams(id) on delete cascade,
     position_id  uuid references positions(id),     -- position played this game
 
     -- Batting (raw counting stats)
@@ -117,6 +118,7 @@ create table if not exists player_game_stats (
 
     -- Defense
     errors int default 0,
+    innings_played numeric(3, 1),                    -- defensive innings on the field
 
     -- Pitching (nullable; only for pitchers)
     ip    numeric(4, 1),                             -- innings pitched, e.g. 5.2
@@ -140,7 +142,7 @@ create table if not exists player_game_stats (
 create table if not exists team_game_stats (
     id        uuid primary key default gen_random_uuid(),
     game_id   uuid references games(id) on delete cascade,
-    team_id   uuid references teams(id),
+    team_id   uuid references teams(id) on delete cascade,
     runs    int default 0,
     hits    int default 0,
     errors  int default 0,
@@ -154,8 +156,29 @@ create table if not exists team_game_stats (
 
 
 -- ---------------------------------------------------------------------
+-- player_defensive_stats  (manually compiled from replays; aggregate per player)
+-- ---------------------------------------------------------------------
+create table if not exists player_defensive_stats (
+    id            uuid primary key default gen_random_uuid(),
+    player_id     uuid references players(id) on delete cascade,
+    season        text not null default 'all',
+    games         int default 0,
+    po            int default 0,                       -- putouts
+    a             int default 0,                       -- assists
+    e             int default 0,                       -- errors
+    dp            int default 0,                       -- double plays
+    opo           int default 0,                       -- chances/opportunities
+    good_throws   int default 0,
+    total_throws  int default 0,
+    created_at    timestamptz default now(),
+    unique (player_id, season)
+);
+
+
+-- ---------------------------------------------------------------------
 -- Indexes (foreign keys + common filter columns)
 -- ---------------------------------------------------------------------
+create index if not exists idx_pds_player      on player_defensive_stats(player_id);
 create index if not exists idx_players_team   on players(team_id);
 create index if not exists idx_games_date      on games(game_date);
 create index if not exists idx_games_season     on games(season);
@@ -183,7 +206,7 @@ declare
     t text;
     tables text[] := array[
         'positions', 'teams', 'players', 'games',
-        'innings', 'player_game_stats', 'team_game_stats'
+        'innings', 'player_game_stats', 'team_game_stats', 'player_defensive_stats'
     ];
 begin
     foreach t in array tables loop
@@ -245,7 +268,8 @@ select
             / nullif(sum(pgs.ab) + sum(pgs.bb), 0)
         + sum(pgs.tb)::numeric
             / nullif(sum(pgs.ab), 0)
-    , 3)                                        as ops
+    , 3)                                        as ops,
+    coalesce(sum(pgs.innings_played), 0)        as innings_played
 from player_game_stats pgs
 join players p on p.id = pgs.player_id
 join games   g on g.id = pgs.game_id

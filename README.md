@@ -86,6 +86,41 @@ The app opens in your browser. On the Phase 1 scaffold you should see a green
 > The `service_role` key is intentionally unused; it bypasses RLS and must never
 > reach the client.
 
+### Migrations
+
+On an **existing** database, apply incremental changes from `db/migrations/` in
+the Supabase SQL Editor (new installs already include them via `schema.sql`):
+
+- `001_add_player_positions.sql` — adds the `players.positions` (eligible
+  defensive positions) column.
+- `002_unique_games.sql` — removes duplicate games and adds a unique index on
+  `(game_date, home_team_id, away_team_id)` so a matchup can't be imported twice.
+- `003_player_team_required.sql` — makes `players.team_id` NOT NULL and the FK
+  `ON DELETE CASCADE` (every player has one team; deleting a team deletes them).
+- `004_team_delete_cascade.sql` — cascades a team's games, innings, and game
+  stats on delete, so a team that has played can be removed cleanly.
+- `005_innings_played.sql` — adds `player_game_stats.innings_played` and exposes
+  it in `v_player_season_totals` for errors-per-inning fielding metrics.
+- `006_player_defensive_stats.sql` — adds the `player_defensive_stats` table
+  (PO/A/E/DP, chances, throws) for real Fielding %, used by the Defense tab,
+  skill radar, and the predicted defensive lineup.
+
+---
+
+## Troubleshooting
+
+**`SSL: CERTIFICATE_VERIFY_FAILED` / "unable to get local issuer certificate"**
+
+Common on corporate networks that do TLS inspection — their internal root CA is
+trusted by your OS/browser but not by Python's bundled `certifi` certs. The app
+ships with [`truststore`](https://truststore.readthedocs.io/) and calls
+`truststore.inject_into_ssl()` at startup, which makes Python validate against the
+**OS certificate store** (where the corporate CA already lives). After pulling
+this change, run `uv sync` and restart the app. If you still see the error, your
+OS may be missing the corporate root CA — ask IT, or as a fallback point Python at
+a CA bundle: `export SSL_CERT_FILE=/path/to/corp-ca.pem` (Windows PowerShell:
+`$env:SSL_CERT_FILE="C:\path\to\corp-ca.pem"`).
+
 ---
 
 ## Build phases
@@ -96,5 +131,9 @@ This project is built and reviewed in phases:
 2. **Core Backend** — models, auth/session, CRUD + analytics services.
 3. **Streamlit UI** — navigation, pages, mobile-first tables & charts.
 4. **Data Ingestion** — PDF + Excel parsers, validation/reconciliation.
-5. **Predictions** — rolling averages + lineup heuristics.
-6. **Export + Polish** — Excel export, UX refinement.
+5. **Predictions** ✅ — rolling form, Monte-Carlo optimized batting order, defensive lineup.
+6. **Export + Polish** ✅ — styled Excel export (Dashboard/Players/Games), UX refinement.
+
+All six phases are complete. Download buttons export styled `.xlsx` workbooks
+(id columns stripped, frozen headers) from the Dashboard (league-wide), Players
+(team roster + totals), and Games pages.

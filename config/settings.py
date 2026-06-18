@@ -35,8 +35,25 @@ def _get(key: str, default: str | None = None) -> str | None:
     return os.environ.get(key, default)
 
 
+def _clean_url(url: str | None) -> str | None:
+    """Normalize a Supabase project URL.
+
+    The supabase client appends '/rest/v1/...' itself, so the configured URL
+    must be the bare project URL (https://<ref>.supabase.co). Users often paste
+    a trailing slash or the full REST endpoint by accident, which causes a
+    PGRST125 "Invalid path specified in request URL" error — strip those here.
+    """
+    if not url:
+        return url
+    url = url.strip().rstrip("/")
+    for suffix in ("/rest/v1", "/rest"):
+        if url.endswith(suffix):
+            url = url[: -len(suffix)]
+    return url.rstrip("/")
+
+
 # --- Supabase ---
-SUPABASE_URL: str | None = _get("SUPABASE_URL")
+SUPABASE_URL: str | None = _clean_url(_get("SUPABASE_URL"))
 SUPABASE_ANON_KEY: str | None = _get("SUPABASE_ANON_KEY")
 
 
@@ -48,6 +65,9 @@ def is_configured() -> bool:
 # --- App constants ---
 APP_TITLE = "Softball League Stats"
 APP_ICON = "🥎"
+
+# Regulation game length for this league (used for ERA scaling + line score).
+GAME_INNINGS = 6
 
 # Default number of recent games used by rolling-average predictions (Phase 5).
 ROLLING_WINDOW_GAMES = 5
