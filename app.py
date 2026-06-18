@@ -42,6 +42,9 @@ PAGES = {
     NAV_PREDICTIONS: predictions.render,
 }
 
+# Pages visible to viewers (not logged in). Admins see every page in PAGES.
+PUBLIC_PAGES = [NAV_PLAYERS, NAV_PREDICTIONS]
+
 
 def _sidebar_auth() -> None:
     """Admin login / logout panel in the sidebar."""
@@ -74,9 +77,12 @@ def main() -> None:
         )
         return
 
+    # Viewers see a limited menu; admins (logged in) see all pages.
+    visible_pages = list(PAGES) if auth.is_admin() else PUBLIC_PAGES
+
     with st.sidebar:
         st.title(f"{APP_ICON} {APP_TITLE}")
-        choice = st.radio("Navigate", list(PAGES), label_visibility="collapsed")
+        choice = st.radio("Navigate", visible_pages, label_visibility="collapsed")
         _sidebar_auth()
 
     st.title(f"{APP_ICON} {APP_TITLE}")
