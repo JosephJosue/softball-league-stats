@@ -1,139 +1,132 @@
 # 🥎 Softball League Stats
 
-A production-ready **Streamlit + Supabase** app for managing a softball league:
-game/score tracking, player & team stats (offense + defense), league analytics,
-simple predictions, PDF/Excel ingestion, and Excel export.
+A web app for tracking and analyzing an amateur softball league — game results,
+player & team statistics (offense **and** defense), league leaderboards, and
+data-driven suggestions for the best batting order and defensive lineup.
 
-Built mobile-first — it's meant to be used mostly from a phone.
+Built **mobile-first** (it's mostly used from a phone at the field) on
+**Streamlit + Supabase**.
+
+---
+
+## What it does
+
+**📊 Dashboard** — league leaders by any stat (with a minimum-AB filter), team
+run-production chart, and stats grouped by position. Totals roll up across the
+whole league.
+
+**🏟️ Teams & 👤 Players** — rosters with multiple eligible positions per player,
+and a per-player detail view with two tabs:
+- **Offense** — AVG / OBP / SLG / OPS, home runs, RBI, and a full game log.
+- **Defense** — putouts, assists, errors, double plays, **fielding %**, and throw
+  accuracy.
+- A **hexagonal skill radar** (Contact · Power · On-Base · Discipline · Production
+  · Defense) showing the player's percentile rank — togglable between the whole
+  **league** and just his **teammates**.
+
+**🥎 Games** — schedule/results, full **box scores** (inning-by-inning line score,
+batting and pitching lines), and admin entry for new games and stat lines.
+
+**📤 Data ingestion** — three ways to get data in, all with an editable preview
+before anything is saved:
+- **GameChanger scorecard PDFs** — parses the two-team layout, including
+  extra-base hits and errors that only appear in the footnotes.
+- **Batting CSV/Excel** — flexible header auto-matching.
+- **Defensive-stats spreadsheet** — the manually-tracked PO/A/E/DP sheet.
+- Smart name matching merges differently-truncated spellings of the same player,
+  flags look-alikes, and reconciles totals against the final score.
+
+**🔮 Predictions** — best hitters, recent form (rolling last-N games), a
+**Monte-Carlo–optimized batting order** that simulates many games to maximize
+expected runs, and a suggested **defensive lineup** built from fielding % and
+each player's eligible positions.
+
+**⬇️ Export** — one-click styled Excel downloads from the Dashboard, Players, and
+Games pages.
+
+---
+
+## Roles & access
+
+Security is enforced by Supabase **Row Level Security**, not just the UI:
+
+- **Viewer** — no account, no login. Reads stats with the public anon key.
+- **Admin** — logs in (email/password) to create, edit, import, and delete. The
+  anon key physically cannot write, even if the UI is bypassed.
+
+By default viewers see **Players** and **Predictions**; admins see the full menu.
+
+---
+
+## Statistics tracked
+
+**Batting:** AB, R, H, RBI, BB, SO, 2B, 3B, HR, TB, LOB → AVG, OBP, SLG, OPS.
+**Pitching:** IP, H, R, ER, BB, SO, HR → ERA (scaled to the league's 6-inning games).
+**Defense:** Games, PO, A, E, DP, chances, throws → **Fielding % = (PO + A) / (PO + A + E)**
+and throw accuracy. Defensive data is compiled manually from game replays.
 
 ---
 
 ## Tech stack
 
-| Layer            | Choice                                             |
-| ---------------- | -------------------------------------------------- |
-| Frontend + logic | Streamlit                                          |
-| Database + Auth  | Supabase (PostgreSQL)                              |
-| DB access        | `supabase-py` client                               |
-| Data processing  | pandas / numpy                                      |
-| Charts           | Plotly                                             |
-| Ingestion        | pdfplumber (PDF), openpyxl/pandas (Excel)         |
-| Packaging        | [uv](https://docs.astral.sh/uv/)                   |
+| Layer            | Choice                                       |
+| ---------------- | -------------------------------------------- |
+| Frontend + logic | Streamlit                                    |
+| Database + Auth  | Supabase (PostgreSQL, RLS)                   |
+| Data / analytics | pandas, numpy                                |
+| Charts           | Plotly                                       |
+| Ingestion        | pdfplumber (PDF), openpyxl (Excel)           |
+| Packaging        | [uv](https://docs.astral.sh/uv/)             |
 
-### Roles (enforced by Row Level Security, not the UI)
-
-- **Viewer** — no account, no login. Reads stats using the public **anon** key.
-- **Admin** — logs in via Supabase Auth (email/password). Any authenticated user
-  may create/edit data. The anon key physically cannot write, even if the UI is
-  bypassed.
-
----
-
-## Project layout
+### Project layout
 
 ```
-app.py            Streamlit entry: nav shell + connectivity check
-config/           Settings (reads st.secrets / .env)
-db/               Supabase client + schema.sql (run this in Supabase)
-auth/             Login / session / admin gating          (Phase 2)
-models/           Pydantic data models                     (Phase 2)
-services/         CRUD + analytics                          (Phase 2)
-ui/               Page render functions                     (Phase 3)
-ingestion/        PDF + Excel parsers + validation          (Phase 4)
-predictions/      Rolling averages + heuristics             (Phase 5)
-export/           Excel export                              (Phase 6)
-utils/            Stat calculations + shared filters
+app.py          Entry point: navigation, auth gating, routing
+config/         Settings (st.secrets / .env)
+db/             Supabase client, schema.sql, migrations/
+auth/           Login / session / admin gating
+models/         Pydantic models + validation
+services/       CRUD + analytics + defensive aggregation
+ingestion/      GameChanger PDF, CSV/Excel, defensive sheet, name matching
+predictions/    Lineup simulation + heuristics
+export/         Styled Excel export
+ui/             Page render functions (mobile-first)
+utils/          Stat calculations, filters, error messages
+tests/          pytest suite
 ```
 
 ---
 
-## Setup
+## Running it
 
-### 1. Supabase
+**Backend (once):** create a Supabase project, run [`db/schema.sql`](db/schema.sql)
+in the SQL Editor (creates tables, RLS, analytics views, and seeds positions),
+enable the **Email** auth provider, and add one admin user. Incremental schema
+changes live in [`db/migrations/`](db/migrations) for already-provisioned
+databases.
 
-1. Create a project at [supabase.com](https://supabase.com) and copy the
-   **Project URL** and the **anon** public key
-   (Project Settings → API).
-2. Open the **SQL Editor**, paste the contents of [`db/schema.sql`](db/schema.sql),
-   and run it. This creates all tables, indexes, RLS policies, analytics views,
-   and seeds the `positions` table.
-3. Go to **Authentication → Providers** and enable **Email**. Then
-   **Authentication → Users → Add user** to create your single admin login.
-
-Verify in the SQL Editor:
-
-```sql
-select tablename from pg_tables where schemaname = 'public';
-select * from pg_policies where schemaname = 'public';
-```
-
-### 2. Local app (with `uv`)
+**Local:**
 
 ```bash
-# Install uv once (if needed):
-#   curl -LsSf https://astral.sh/uv/install.sh | sh
-
-uv sync                      # creates .venv and installs all dependencies
-cp .env.example .env         # then fill in SUPABASE_URL + SUPABASE_ANON_KEY
-uv run streamlit run app.py  # uv manages the virtualenv for you
+uv sync
+cp .env.example .env          # add SUPABASE_URL + SUPABASE_ANON_KEY
+uv run streamlit run app.py
 ```
 
-The app opens in your browser. On the Phase 1 scaffold you should see a green
-**"Connected to Supabase ✅"** message once your keys and schema are in place.
+**Deploy (Streamlit Community Cloud):** point it at this repo / `main` / `app.py`,
+set Python 3.11, and add `SUPABASE_URL` and `SUPABASE_ANON_KEY` under **Secrets**.
 
-> Secrets: the app reads `st.secrets` first, then falls back to `.env`. Both
-> `.env` and `.streamlit/secrets.toml` are git-ignored — never commit real keys.
-> The `service_role` key is intentionally unused; it bypasses RLS and must never
-> reach the client.
+> The app reads `st.secrets` first, then `.env`. Never commit real keys. The
+> `service_role` key is intentionally unused — only the public anon key reaches
+> the client, exactly as RLS expects.
 
-### Migrations
-
-On an **existing** database, apply incremental changes from `db/migrations/` in
-the Supabase SQL Editor (new installs already include them via `schema.sql`):
-
-- `001_add_player_positions.sql` — adds the `players.positions` (eligible
-  defensive positions) column.
-- `002_unique_games.sql` — removes duplicate games and adds a unique index on
-  `(game_date, home_team_id, away_team_id)` so a matchup can't be imported twice.
-- `003_player_team_required.sql` — makes `players.team_id` NOT NULL and the FK
-  `ON DELETE CASCADE` (every player has one team; deleting a team deletes them).
-- `004_team_delete_cascade.sql` — cascades a team's games, innings, and game
-  stats on delete, so a team that has played can be removed cleanly.
-- `005_innings_played.sql` — adds `player_game_stats.innings_played` and exposes
-  it in `v_player_season_totals` for errors-per-inning fielding metrics.
-- `006_player_defensive_stats.sql` — adds the `player_defensive_stats` table
-  (PO/A/E/DP, chances, throws) for real Fielding %, used by the Defense tab,
-  skill radar, and the predicted defensive lineup.
+**Tests:** `uv run pytest`  ·  **Lint:** `uv run ruff check .`
 
 ---
 
-## Troubleshooting
+## Notes
 
-**`SSL: CERTIFICATE_VERIFY_FAILED` / "unable to get local issuer certificate"**
-
-Common on corporate networks that do TLS inspection — their internal root CA is
-trusted by your OS/browser but not by Python's bundled `certifi` certs. The app
-ships with [`truststore`](https://truststore.readthedocs.io/) and calls
-`truststore.inject_into_ssl()` at startup, which makes Python validate against the
-**OS certificate store** (where the corporate CA already lives). After pulling
-this change, run `uv sync` and restart the app. If you still see the error, your
-OS may be missing the corporate root CA — ask IT, or as a fallback point Python at
-a CA bundle: `export SSL_CERT_FILE=/path/to/corp-ca.pem` (Windows PowerShell:
-`$env:SSL_CERT_FILE="C:\path\to\corp-ca.pem"`).
-
----
-
-## Build phases
-
-This project is built and reviewed in phases:
-
-1. **Architecture & Setup** ✅ — structure, schema, config, scaffold.
-2. **Core Backend** — models, auth/session, CRUD + analytics services.
-3. **Streamlit UI** — navigation, pages, mobile-first tables & charts.
-4. **Data Ingestion** — PDF + Excel parsers, validation/reconciliation.
-5. **Predictions** ✅ — rolling form, Monte-Carlo optimized batting order, defensive lineup.
-6. **Export + Polish** ✅ — styled Excel export (Dashboard/Players/Games), UX refinement.
-
-All six phases are complete. Download buttons export styled `.xlsx` workbooks
-(id columns stripped, frozen headers) from the Dashboard (league-wide), Players
-(team roster + totals), and Games pages.
+- **ERA, line scores, and the lineup simulator use 6-inning games** (the league's
+  regulation length), configurable in `config/settings.py`.
+- A `truststore` shim lets the app connect through corporate TLS-inspection
+  proxies (validates against the OS certificate store).
