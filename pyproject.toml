@@ -36,6 +36,11 @@ dev = [
 line-length = 100
 target-version = "py311"
 
+[tool.uv]
+# This is an application, not a library — don't try to build/install the repo
+# itself as a package (it's run from the repo root via `streamlit run app.py`).
+package = false
+
 [tool.ruff.lint.per-file-ignores]
 # Scripts insert the project root on sys.path before importing project modules.
 "scripts/*" = ["E402"]
